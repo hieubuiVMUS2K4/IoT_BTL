@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IoT Smart Home Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 8px 20px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+
+        .status-badge.online {
+            background: #4CAF50;
+        }
+
+        .status-badge.offline {
+            background: #f44336;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .card-icon {
+            font-size: 2em;
+            margin-right: 15px;
+        }
+
+        .card-title {
+            font-size: 1.3em;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .card-content {
+            margin-top: 15px;
+        }
+
+        .sensor-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #667eea;
+            margin: 10px 0;
+        }
+
+        .sensor-unit {
+            font-size: 0.5em;
+            color: #999;
+            margin-left: 5px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+
+        .status-indicator.active {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .status-indicator.inactive {
+            background: #fce4ec;
+            color: #c62828;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+
+        .status-dot.active {
+            background: #4CAF50;
+            box-shadow: 0 0 10px #4CAF50;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.inactive {
+            background: #999;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .control-button {
+            width: 100%;
+            padding: 15px;
+            margin: 8px 0;
+            border: none;
+            border-radius: 10px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+        }
+
+        .btn-on {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-on:hover {
+            background: #45a049;
+            transform: scale(1.05);
+        }
+
+        .btn-off {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-off:hover {
+            background: #da190b;
+            transform: scale(1.05);
+        }
+
+        .btn-toggle {
+            background: #2196F3;
+            color: white;
+        }
+
+        .btn-toggle:hover {
+            background: #0b7dda;
+            transform: scale(1.05);
+        }
+
+        .alert-box {
+            background: #ffebee;
+            border-left: 5px solid #f44336;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            animation: shake 0.5s;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            75% { transform: translateX(10px); }
+        }
+
+        .alert-icon {
+            font-size: 1.5em;
+            margin-right: 10px;
+        }
+
+        .timestamp {
+            text-align: center;
+            color: white;
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+            
+            header h1 {
+                font-size: 1.8em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🏠 Smart Home IoT Dashboard</h1>
+            <div class="status-badge" id="connectionStatus">
+                🔴 Đang kết nối...
+            </div>
+        </header>
+
+        <div class="dashboard">
+            <!-- NHIỆT ĐỘ & ĐỘ ẨM -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">🌡️</div>
+                    <div class="card-title">Nhiệt độ & Độ ẩm</div>
+                </div>
+                <div class="card-content">
+                    <div class="sensor-value">
+                        <span id="temperature">--</span><span class="sensor-unit">°C</span>
+                    </div>
+                    <div class="sensor-value" style="color: #2196F3;">
+                        <span id="humidity">--</span><span class="sensor-unit">%</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CẢM BIẾN CHUYỂN ĐỘNG -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">👤</div>
+                    <div class="card-title">Cảm biến chuyển động</div>
+                </div>
+                <div class="card-content">
+                    <div class="status-indicator" id="pirStatus">
+                        <div class="status-dot"></div>
+                        <span>Không phát hiện</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ĐIỀU KHIỂN ĐÈN -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">💡</div>
+                    <div class="card-title">Điều khiển đèn</div>
+                </div>
+                <div class="card-content">
+                    <!-- LED 1: CHỈ HIỂN THỊ TRẠNG THÁI (TỰ ĐỘNG BỞI PIR) -->
+                    <div class="status-indicator" id="led1Status">
+                        <div class="status-dot"></div>
+                        <span>LED 1 (PIR - Auto): TẮT</span>
+                    </div>
+                    <div style="background: rgba(255,193,7,0.1); padding: 10px; border-radius: 5px; margin-bottom: 15px; font-size: 0.9em; color: #FFC107;">
+                        ⚠️ LED 1 tự động điều khiển bởi cảm biến PIR
+                    </div>
+                    
+                    <!-- LED 2: CÓ NÚT ĐIỀU KHIỂN -->
+                    <div class="status-indicator" id="led2Status">
+                        <div class="status-dot"></div>
+                        <span>LED 2 (Manual): TẮT</span>
+                    </div>
+                    <div class="grid-2">
+                        <button class="control-button btn-on" onclick="controlDevice('led2', 'on')">BẬT LED 2</button>
+                        <button class="control-button btn-off" onclick="controlDevice('led2', 'off')">TẮT LED 2</button>
+                    </div>
+                    <button class="control-button btn-toggle" onclick="controlDevice('led2', 'toggle')">TOGGLE</button>
+                </div>
+            </div>
+
+            <!-- ĐIỀU KHIỂN CỬA -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">🚪</div>
+                    <div class="card-title">Điều khiển cửa</div>
+                </div>
+                <div class="card-content">
+                    <div class="status-indicator" id="doorStatus">
+                        <div class="status-dot"></div>
+                        <span>Cửa: ĐÓNG</span>
+                    </div>
+                    <div class="grid-2">
+                        <button class="control-button btn-on" onclick="controlDevice('door', 'open')">MỞ CỬA</button>
+                        <button class="control-button btn-off" onclick="controlDevice('door', 'close')">ĐÓNG CỬA</button>
+                    </div>
+                    <button class="control-button btn-toggle" onclick="controlDevice('door', 'toggle')">TOGGLE</button>
+                </div>
+            </div>
+
+            <!-- RFID ACCESS -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">🔐</div>
+                    <div class="card-title">Truy cập RFID</div>
+                </div>
+                <div class="card-content">
+                    <div class="status-indicator" id="rfidStatus">
+                        <div class="status-dot"></div>
+                        <span>Chưa quẹt thẻ</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TỰ ĐỘNG MỞ CỬA -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">🚶</div>
+                    <div class="card-title">Tự động mở cửa (HC-SR04)</div>
+                </div>
+                <div class="card-content">
+                    <div class="sensor-value" style="color: #FF9800; font-size: 2em;">
+                        <span id="distance">--</span><span class="sensor-unit">cm</span>
+                    </div>
+                    <div id="autoOpenAlert"></div>
+                    <div style="margin-top: 10px; font-size: 0.85em; color: #666;">
+                        💡 Cửa tự động mở khi phát hiện người < 10cm
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="timestamp">
+            Cập nhật lần cuối: <span id="lastUpdate">--</span>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let reconnectInterval;
+
+        // Kết nối WebSocket
+        function connectWebSocket() {
+            ws = new WebSocket('ws://' + window.location.hostname + ':3001');
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                document.getElementById('connectionStatus').className = 'status-badge online';
+                document.getElementById('connectionStatus').textContent = '🟢 Đã kết nối';
+                clearInterval(reconnectInterval);
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                if (message.type === 'update' || message.type === 'init') {
+                    updateDashboard(message.data);
+                }
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                document.getElementById('connectionStatus').className = 'status-badge offline';
+                document.getElementById('connectionStatus').textContent = '🔴 Mất kết nối';
+                
+                // Thử kết nối lại sau 3 giây
+                reconnectInterval = setInterval(() => {
+                    console.log('Reconnecting...');
+                    connectWebSocket();
+                }, 3000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        // Cập nhật dashboard
+        function updateDashboard(data) {
+            // Nhiệt độ & độ ẩm
+            document.getElementById('temperature').textContent = data.temperature.toFixed(1);
+            document.getElementById('humidity').textContent = data.humidity.toFixed(1);
+
+            // PIR
+            const pirStatus = document.getElementById('pirStatus');
+            if (data.pir) {
+                pirStatus.className = 'status-indicator active';
+                pirStatus.innerHTML = '<div class="status-dot active"></div><span>🚶 Phát hiện chuyển động!</span>';
+            } else {
+                pirStatus.className = 'status-indicator inactive';
+                pirStatus.innerHTML = '<div class="status-dot inactive"></div><span>Không phát hiện</span>';
+            }
+
+            // LED 1 (Chỉ hiển thị - tự động bởi PIR)
+            const led1Status = document.getElementById('led1Status');
+            if (data.led1) {
+                led1Status.className = 'status-indicator active';
+                led1Status.innerHTML = '<div class="status-dot active"></div><span>LED 1 (PIR - Auto): BẬT 💡</span>';
+            } else {
+                led1Status.className = 'status-indicator inactive';
+                led1Status.innerHTML = '<div class="status-dot inactive"></div><span>LED 1 (PIR - Auto): TẮT</span>';
+            }
+
+            // LED 2 (Điều khiển thủ công)
+            const led2Status = document.getElementById('led2Status');
+            if (data.led2) {
+                led2Status.className = 'status-indicator active';
+                led2Status.innerHTML = '<div class="status-dot active"></div><span>LED 2 (Manual): BẬT 💡</span>';
+            } else {
+                led2Status.className = 'status-indicator inactive';
+                led2Status.innerHTML = '<div class="status-dot inactive"></div><span>LED 2 (Manual): TẮT</span>';
+            }
+
+            // Cửa
+            const doorStatus = document.getElementById('doorStatus');
+            if (data.door) {
+                doorStatus.className = 'status-indicator active';
+                doorStatus.innerHTML = '<div class="status-dot active"></div><span>Cửa: MỞ</span>';
+            } else {
+                doorStatus.className = 'status-indicator inactive';
+                doorStatus.innerHTML = '<div class="status-dot inactive"></div><span>Cửa: ĐÓNG</span>';
+            }
+
+            // RFID
+            const rfidStatus = document.getElementById('rfidStatus');
+            if (data.rfid) {
+                rfidStatus.className = 'status-indicator active';
+                rfidStatus.innerHTML = '<div class="status-dot active"></div><span>✅ Truy cập hợp lệ</span>';
+            } else {
+                rfidStatus.className = 'status-indicator inactive';
+                rfidStatus.innerHTML = '<div class="status-dot inactive"></div><span>Chưa quẹt thẻ</span>';
+            }
+
+            // Khoảng cách
+            document.getElementById('distance').textContent = data.distance.toFixed(1);
+
+            // Trạng thái tự động mở cửa
+            const autoOpenAlert = document.getElementById('autoOpenAlert');
+            if (data.autoOpen && data.distance < 10) {
+                autoOpenAlert.innerHTML = '<div class="alert-box" style="background: rgba(76, 175, 80, 0.1); border-color: #4CAF50;"><span class="alert-icon">🚶</span><strong>TỰ ĐỘNG MỞ CỬA</strong><br>Phát hiện người ở ' + data.distance.toFixed(1) + ' cm</div>';
+            } else {
+                autoOpenAlert.innerHTML = '';
+            }
+
+            // Timestamp
+            const date = new Date(data.lastUpdate);
+            document.getElementById('lastUpdate').textContent = date.toLocaleString('vi-VN');
+        }
+
+        // Điều khiển thiết bị
+        async function controlDevice(device, action) {
+            // CHẶN lệnh điều khiển LED 1 (chỉ tự động bởi PIR)
+            if (device === 'led1') {
+                alert('⚠️ LED 1 chỉ tự động điều khiển bởi cảm biến PIR!\n\nKhông thể điều khiển thủ công.');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/control', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ device, action })
+                });
+
+                const result = await response.json();
+                console.log('Control result:', result);
+                
+                // Hiển thị thông báo
+                const deviceName = device === 'led2' ? 'LED 2' : device === 'door' ? 'Cửa' : device.toUpperCase();
+                alert(`✅ Đã gửi lệnh: ${action.toUpperCase()} cho ${deviceName}`);
+            } catch (error) {
+                console.error('Control error:', error);
+                alert('❌ Lỗi khi gửi lệnh điều khiển!');
+            }
+        }
+
+        // Khởi động
+        connectWebSocket();
+    </script>
+</body>
+</html>
