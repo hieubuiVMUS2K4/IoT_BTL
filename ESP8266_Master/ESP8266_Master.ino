@@ -10,17 +10,20 @@
  */
 
 #include <ESP8266WiFi.h>
-#include <ESP8266HTTPClient.h>
 #include <Wire.h>
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
+
+// ===== NETWORK CONFIGURATION =====
+// Thay đổi IP này khi chuyển mạng WiFi khác
+const char* SERVER_IP = "10.137.147.176";  // IP của máy tính chạy server
 
 // ===== CẤU HÌNH WIFI =====
 const char* ssid = "tinhvdth";          // Thay bằng tên WiFi của bạn
 const char* password = "123456789tt";   // Thay bằng mật khẩu WiFi
 
 // ===== CẤU HÌNH MQTT =====
-const char* mqttServer = "10.137.147.176";  // IP máy tính chạy MQTT broker
+const char* mqttServer = SERVER_IP;  // Sử dụng constant thay vì hardcode
 const int mqttPort = 1883;
 const char* mqttUser = "";              // Username (nếu có)
 const char* mqttPassword = "";          // Password (nếu có)
@@ -63,10 +66,17 @@ Slave2Data slave2Data;
 // ===== BIẾN ĐIỀU KHIỂN =====
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
+
+// Non-blocking timing variables
 unsigned long lastUpdate = 0;
 const unsigned long updateInterval = 2000;  // Gửi dữ liệu mỗi 2 giây
 unsigned long lastMqttReconnect = 0;
 const unsigned long mqttReconnectInterval = 5000;  // Thử kết nối MQTT mỗi 5 giây
+unsigned long lastI2CRead = 0;
+const unsigned long i2cReadInterval = 100;  // Đọc I2C mỗi 100ms
+unsigned long lastSlave1Read = 0;
+unsigned long lastSlave2Read = 0;
+const unsigned long slaveReadInterval = 50;  // Khoảng cách tối thiểu giữa 2 lần đọc slave
 
 // ===== MQTT CALLBACK =====
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
@@ -153,37 +163,52 @@ void setup() {
 }
 
 void loop() {
-   // Kiểm tra kết nối WiFi
+   unsigned long currentMillis = millis();
+
+   // Kiểm tra kết nối WiFi (non-blocking)
    if (WiFi.status() != WL_CONNECTED) {
      Serial.println("WiFi disconnected, reconnecting...");
      connectWiFi();
    }
 
-   // Kiểm tra kết nối MQTT
+   // Kiểm tra kết nối MQTT (non-blocking)
    if (!mqttClient.connected()) {
-     if (millis() - lastMqttReconnect > mqttReconnectInterval) {
+     if (currentMillis - lastMqttReconnect > mqttReconnectInterval) {
        reconnectMQTT();
-       lastMqttReconnect = millis();
+       lastMqttReconnect = currentMillis;
      }
-   } else {
-     mqttClient.loop();  // Xử lý MQTT messages
    }
 
-   // Thu thập dữ liệu từ Slave 1
-   readSlave1Data();
-   delay(100);  // Tăng delay giữa các lần đọc
+   // MQTT loop phải chạy liên tục để nhận messages (CRITICAL for instant response)
+   if (mqttClient.connected()) {
+     mqttClient.loop();
+   }
 
-   // Thu thập dữ liệu từ Slave 2
-   readSlave2Data();
-   delay(100);  // Tăng delay giữa các lần đọc
+   // Thu thập dữ liệu từ I2C slaves (non-blocking với timing)
+   if (currentMillis - lastI2CRead > i2cReadInterval) {
+     // Đọc Slave 1
+     if (currentMillis - lastSlave1Read > slaveReadInterval) {
+       readSlave1Data();
+       lastSlave1Read = currentMillis;
+     }
 
-   // Gửi dữ liệu lên MQTT broker
-   if (millis() - lastUpdate > updateInterval) {
+     // Đọc Slave 2 (xen kẽ với Slave 1)
+     if (currentMillis - lastSlave2Read > slaveReadInterval &&
+         currentMillis - lastSlave1Read > slaveReadInterval / 2) {
+       readSlave2Data();
+       lastSlave2Read = currentMillis;
+     }
+
+     lastI2CRead = currentMillis;
+   }
+
+   // Gửi dữ liệu lên MQTT broker (non-blocking)
+   if (currentMillis - lastUpdate > updateInterval) {
      publishSensorData();
-     lastUpdate = millis();
+     lastUpdate = currentMillis;
    }
 
-   delay(500);
+   // Không có delay() - loop chạy liên tục để đảm bảo responsiveness
 }
 
 // ===== KẾT NỐI MQTT =====

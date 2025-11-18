@@ -26,12 +26,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _initializeConnection() async {
     final iotProvider = Provider.of<IoTProvider>(context, listen: false);
-    
-    // Kết nối MQTT
+
+    // Kết nối MQTT - data will be received automatically via subscriptions
     await iotProvider.connectMQTT();
-    
-    // Fetch dữ liệu ban đầu
-    await iotProvider.fetchCurrentData();
   }
 
   @override
@@ -41,8 +38,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _handleRefresh() async {
-    final iotProvider = Provider.of<IoTProvider>(context, listen: false);
-    await iotProvider.fetchCurrentData();
+    // Data is updated in real-time via MQTT, no need to manually refresh
+    // Just show a brief message to indicate the system is working
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Dữ liệu được cập nhật tự động qua MQTT'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   void _handleLogout() async {

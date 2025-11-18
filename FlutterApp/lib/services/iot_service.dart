@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 import '../models/iot_data_model.dart';
@@ -9,14 +8,23 @@ class IoTService {
    final String mqttUrl;
    final int mqttPort;
 
+   // Network Configuration - Thay đổi IP này khi chuyển mạng WiFi
+   static const String SERVER_IP = '10.137.147.176'; // IP của máy tính chạy server
+
    MqttServerClient? _mqttClient;
    Function(String topic, String payload)? _onMessageReceived;
 
    IoTService({
-     this.baseUrl = 'http://10.137.147.176:3000', // Thay IP của PC
-     this.mqttUrl = '10.137.147.176', // MQTT broker IP
+     String? serverIP,
      this.mqttPort = 1883,
-   });
+   }) :
+     baseUrl = 'http://${serverIP ?? SERVER_IP}:3000',
+     mqttUrl = serverIP ?? SERVER_IP;
+
+   // Factory constructor for default configuration
+   factory IoTService.defaultConfig() {
+     return IoTService(serverIP: SERVER_IP);
+   }
 
   // Kết nối MQTT
   Future<bool> connectMQTT(Function(String topic, String payload) onMessageReceived) async {
@@ -68,7 +76,10 @@ class IoTService {
 
   void _subscribeToTopics() {
     if (_mqttClient != null) {
+      // Subscribe to sensor data topics
       _mqttClient!.subscribe('/iot/smarthome/sensors/#', MqttQos.atMostOnce);
+      // Subscribe to system updates topic
+      _mqttClient!.subscribe('/iot/smarthome/updates', MqttQos.atMostOnce);
       _mqttClient!.updates!.listen(_onMessage);
     }
   }
@@ -83,72 +94,24 @@ class IoTService {
     }
   }
 
-  // Lấy dữ liệu hiện tại qua HTTP
-  Future<IoTData?> getCurrentData() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/api/status'),
-      ).timeout(const Duration(seconds: 5));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return IoTData.fromJson(data);
+  // Publish MQTT message directly (for instant control commands)
+  Future<bool> publishMessage(String topic, String payload) async {
+    if (_mqttClient != null && _mqttClient!.connectionStatus!.state == MqttConnectionState.connected) {
+      try {
+        final builder = MqttClientPayloadBuilder();
+        builder.addString(payload);
+        _mqttClient!.publishMessage(
+          topic,
+          MqttQos.atMostOnce,
+          builder.payload!,
+        );
+        return true;
+      } catch (e) {
+        print('Error publishing MQTT message: $e');
+        return false;
       }
-      return null;
-    } catch (e) {
-      print('Error getting current data: $e');
-      return null;
     }
+    return false;
   }
 
-  // Điều khiển LED 2
-  Future<bool> controlLed2(String action) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/control'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'device': 'led2',
-          'action': action,
-        }),
-      ).timeout(const Duration(seconds: 5));
-
-      return response.statusCode == 200;
-    } catch (e) {
-      print('Error controlling LED2: $e');
-      return false;
-    }
-  }
-
-  // Điều khiển cửa
-  Future<bool> controlDoor(String action) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/control'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'device': 'door',
-          'action': action,
-        }),
-      ).timeout(const Duration(seconds: 5));
-
-      return response.statusCode == 200;
-    } catch (e) {
-      print('Error controlling door: $e');
-      return false;
-    }
-  }
-
-  // Kiểm tra kết nối
-  Future<bool> checkConnection() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$baseUrl/api/status'),
-      ).timeout(const Duration(seconds: 3));
-
-      return response.statusCode == 200;
-    } catch (e) {
-      return false;
-    }
-  }
 }

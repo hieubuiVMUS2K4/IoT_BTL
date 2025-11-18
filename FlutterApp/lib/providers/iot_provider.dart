@@ -39,7 +39,13 @@ class IoTProvider with ChangeNotifier {
     try {
       final jsonData = jsonDecode(payload);
 
-      if (topic.startsWith('/iot/smarthome/sensors/')) {
+      if (topic == '/iot/smarthome/updates') {
+        // System update from server (full data)
+        if (jsonData['type'] == 'update' && jsonData['data'] != null) {
+          _updateData(jsonData['data']);
+        }
+      } else if (topic.startsWith('/iot/smarthome/sensors/')) {
+        // Individual sensor updates
         _updateDataFromMQTT(topic, jsonData);
       }
     } catch (e) {
@@ -109,59 +115,33 @@ class IoTProvider with ChangeNotifier {
     }
   }
 
-  // Lấy dữ liệu hiện tại (fallback khi WebSocket lỗi)
-  Future<void> fetchCurrentData() async {
-    _isLoading = true;
-    notifyListeners();
 
-    try {
-      final newData = await _iotService.getCurrentData();
-      if (newData != null) {
-        _data = newData;
-        _isConnected = true;
-      }
-    } catch (e) {
-      print('Error fetching data: $e');
-      _isConnected = false;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  // Điều khiển LED 2
+  // Điều khiển LED 2 (Direct MQTT publish for instant response)
   Future<bool> controlLed2(String action) async {
     try {
-      return await _iotService.controlLed2(action);
+      final topic = '/iot/smarthome/commands/led2';
+      final payload = '{"action":"$action","timestamp":${DateTime.now().millisecondsSinceEpoch}}';
+      return await _iotService.publishMessage(topic, payload);
     } catch (e) {
       print('Error controlling LED2: $e');
       return false;
     }
   }
 
-  // Điều khiển cửa
+  // Điều khiển cửa (Direct MQTT publish for instant response)
   Future<bool> controlDoor(String action) async {
     try {
-      return await _iotService.controlDoor(action);
+      final topic = '/iot/smarthome/commands/door';
+      final payload = '{"action":"$action","timestamp":${DateTime.now().millisecondsSinceEpoch}}';
+      return await _iotService.publishMessage(topic, payload);
     } catch (e) {
       print('Error controlling door: $e');
       return false;
     }
   }
 
-  // Kiểm tra kết nối
-  Future<bool> checkConnection() async {
-    try {
-      final result = await _iotService.checkConnection();
-      _isConnected = result;
-      notifyListeners();
-      return result;
-    } catch (e) {
-      _isConnected = false;
-      notifyListeners();
-      return false;
-    }
-  }
+  // MQTT connection status is managed automatically
+  // Connection status is updated via MQTT connection callbacks
 
   // Ngắt kết nối
   void disconnect() {

@@ -1,7 +1,7 @@
-# 🏠 HỆ THỐNG IOT SMART HOME
+# 🏠 HỆ THỐNG IOT SMART HOME - MQTT VERSION
 ## ESP8266 + 2 Arduino Uno + Flutter Mobile App
 
-**Đồ án IoT - Hệ thống nhà thông minh đa nền tảng**
+**Đồ án IoT - Hệ thống nhà thông minh đa nền tảng với MQTT Protocol**
 
 ---
 
@@ -15,7 +15,7 @@ Hệ thống IoT Smart Home là một giải pháp nhà thông minh hoàn chỉn
 - **Quản lý người dùng** với xác thực và phân quyền
 - **Đa nền tảng** hỗ trợ Web, Windows, Android
 
-### **Kiến trúc tổng thể**
+### **Kiến trúc tổng thể - PURE MQTT**
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        PRESENTATION LAYER                        │
@@ -23,19 +23,19 @@ Hệ thống IoT Smart Home là một giải pháp nhà thông minh hoàn chỉn
 │   Web Dashboard      │   Flutter Mobile App  │  Windows Desktop  │
 │   (HTML/CSS/JS)      │   (Dart/Flutter)      │  (Flutter)        │
 └──────────┬───────────┴───────────┬───────────┴───────────────────┘
-            │ HTTP/WebSocket        │ MQTT
-            ▼                       ▼
+             │ MQTT Subscribe        │ MQTT Subscribe
+             ▼                       ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │                        APPLICATION LAYER                         │
 │                Node.js MQTT Broker + REST API Server             │
 │  - Aedes MQTT Broker (port 1883)                                 │
-│  - Express.js (HTTP endpoints)                                   │
-│  - WebSocket Server (Real-time communication)                    │
+│  - Express.js (minimal HTTP endpoints)                           │
 │  - MQTT Client (sensor/command handling)                         │
 │  - JSON Database (User authentication)                           │
+│  - Real-time MQTT broadcasting                                    │
 └──────────────────────┬──────────────────────────────────────────┘
-                        │ MQTT Publish/Subscribe (WiFi)
-                        ▼
+                         │ MQTT Publish/Subscribe (WiFi)
+                         ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │                      COMMUNICATION LAYER                         │
 │                    ESP8266 WiFi Master (I2C+MQTT)                │
@@ -43,7 +43,7 @@ Hệ thống IoT Smart Home là một giải pháp nhà thông minh hoàn chỉn
 │  - I2C Master coordinator                                        │
 │  - MQTT Publisher (sensor data)                                  │
 │  - MQTT Subscriber (commands)                                    │
-│  - Data aggregation & command distribution                       │
+│  - Event-driven command processing                               │
 └────────┬──────────────────────────────┬─────────────────────────┘
           │ I2C Protocol                 │ I2C Protocol
           ▼                              ▼
@@ -86,14 +86,14 @@ Hệ thống IoT Smart Home là một giải pháp nhà thông minh hoàn chỉn
 - 📱 **Đa nền tảng**: Android, iOS, Windows Desktop
 - 🔐 **Xác thực người dùng**: Login/Register với JSON database
 - 🎨 **Material Design 3**: Giao diện hiện đại, mượt mà
-- ⚡ **Real-time**: WebSocket tự động cập nhật sensor
+- ⚡ **Real-time MQTT**: Tự động cập nhật sensor qua MQTT
 - 📊 **Dashboard**: Hiển thị trực quan tất cả sensor
-- 🎮 **Control Panel**: Điều khiển LED, cửa từ mobile
+- 🎮 **Control Panel**: Điều khiển LED, cửa qua MQTT publish
 
 ### **5. Web Dashboard**
 - 🌐 **Responsive design**: Tương thích mọi thiết bị
 - 📊 **Biểu đồ realtime**: Chart.js visualization
-- 🔌 **WebSocket**: Cập nhật không cần refresh
+- 🔌 **MQTT Updates**: Cập nhật real-time qua MQTT subscriptions
 - 🎨 **UI/UX**: Clean, professional design
 
 ---
@@ -1531,7 +1531,7 @@ GND ---------------------- GND ---------------------- GND
 
 #### **Cho ESP8266:**
 - `ESP8266WiFi` (built-in với ESP8266 board)
-- `ESP8266HTTPClient` (built-in)
+- `PubSubClient` by Nick O'Leary (MQTT client)
 - `ArduinoJson` by Benoit Blanchon (v6.x)
 - `PubSubClient` by Nick O'Leary (MQTT client)
 - `Wire` (built-in)

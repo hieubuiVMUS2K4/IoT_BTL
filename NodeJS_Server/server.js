@@ -1,7 +1,6 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const WebSocket = require('ws');
 const path = require('path');
 const aedes = require('aedes')();
 const mqtt = require('mqtt');
@@ -45,31 +44,22 @@ mqttServer.listen(MQTT_PORT, () => {
 // MQTT Client for server operations
 let mqttClient;
 
-// ===== WEBSOCKET SERVER =====
-const wss = new WebSocket.Server({ port: 3001 });
+// ===== MQTT PUBLISH FOR CLIENT UPDATES =====
+function publishSystemUpdate() {
+  if (mqttClient && mqttClient.connected) {
+    const topic = '/iot/smarthome/updates';
+    const payload = JSON.stringify({
+      type: 'update',
+      data: systemData
+    });
 
-// Broadcast to all connected WebSocket clients
-function broadcast(data) {
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(data));
-    }
-  });
+    mqttClient.publish(topic, payload, { qos: 1, retain: true }, (err) => {
+      if (!err) {
+        console.log('Published system update to MQTT');
+      }
+    });
+  }
 }
-
-wss.on('connection', (ws) => {
-  console.log('WebSocket client connected');
-
-  // Gửi dữ liệu hiện tại cho client mới
-  ws.send(JSON.stringify({
-    type: 'init',
-    data: systemData
-  }));
-
-  ws.on('close', () => {
-    console.log('WebSocket client disconnected');
-  });
-});
 
 // ===== MQTT CLIENT SETUP =====
 function setupMQTTClient() {
@@ -126,11 +116,8 @@ function setupMQTTClient() {
 
         systemData.lastUpdate = new Date().toISOString();
 
-        // Broadcast to WebSocket clients
-        broadcast({
-          type: 'update',
-          data: systemData
-        });
+        // Publish update to MQTT for clients to subscribe
+        publishSystemUpdate();
 
       } else if (topic.startsWith('/iot/smarthome/status/')) {
         const device = topic.split('/').pop();
@@ -155,90 +142,32 @@ function setupMQTTClient() {
   });
 }
 
-// ===== API ENDPOINTS =====
+// ===== MINIMAL HTTP ENDPOINTS =====
+// Only keep essential endpoints for pure MQTT operation
 
-// Trang chủ
+// Trang chủ (serve static files)
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Legacy HTTP endpoints for ESP8266 (deprecated - using MQTT now)
-// These can be removed once ESP8266 is updated to MQTT
-app.post('/api/data', (req, res) => {
-  console.log('WARNING: ESP8266 still using HTTP POST - should migrate to MQTT');
-  console.log('Received data from ESP8266:', req.body);
-
-  // Cập nhật dữ liệu hệ thống
-  systemData = {
-    ...req.body,
-    lastUpdate: new Date().toISOString()
-  };
-
-  // Broadcast qua WebSocket
-  broadcast({
-    type: 'update',
-    data: systemData
-  });
-
+// Health check endpoint
+app.get('/health', (req, res) => {
   res.json({
-    status: 'success',
-    message: 'Data received (HTTP - migrate to MQTT)'
+    status: 'ok',
+    mqtt: mqttClient && mqttClient.connected ? 'connected' : 'disconnected',
+    timestamp: new Date().toISOString()
   });
-});
-
-app.get('/api/commands', (req, res) => {
-  console.log('WARNING: ESP8266 still polling for commands - should use MQTT subscription');
-  res.json({});
-});
-
-// Web client gửi lệnh điều khiển
-app.post('/api/control', (req, res) => {
-  const { device, action } = req.body;
-  console.log(`Control command: ${device} -> ${action}`);
-
-  // Publish command via MQTT
-  if (mqttClient && mqttClient.connected) {
-    const topic = `/iot/smarthome/commands/${device}`;
-    const payload = JSON.stringify({ action, timestamp: Date.now() });
-
-    mqttClient.publish(topic, payload, { qos: 1, retain: false }, (err) => {
-      if (err) {
-        console.error('Error publishing MQTT command:', err);
-        res.status(500).json({
-          status: 'error',
-          message: 'Failed to send command'
-        });
-      } else {
-        console.log(`Published command to ${topic}: ${payload}`);
-        res.json({
-          status: 'success',
-          message: `Command ${action} for ${device} sent via MQTT`
-        });
-      }
-    });
-  } else {
-    res.status(503).json({
-      status: 'error',
-      message: 'MQTT broker not connected'
-    });
-  }
-});
-
-// Lấy dữ liệu hiện tại (cho web)
-app.get('/api/status', (req, res) => {
-  res.json(systemData);
 });
 
 // ===== KHỞI ĐỘNG SERVER =====
 app.listen(PORT, '0.0.0.0', () => {
   console.log('==============================================');
-  console.log('IoT Smart Home Server Started (MQTT + HTTP)');
+  console.log('IoT Smart Home Server Started (PURE MQTT)');
   console.log('==============================================');
-  console.log(`HTTP Server: http://localhost:${PORT}`);
-  console.log(`WebSocket Server: ws://localhost:3001`);
+  console.log(`HTTP Server: http://localhost:${PORT} (legacy)`);
   console.log(`MQTT Broker: ${MQTT_BROKER_URL}`);
   console.log('==============================================');
-  console.log('Waiting for connections...');
+  console.log('Waiting for MQTT connections...');
 
   // Initialize MQTT client after server starts
   setTimeout(() => {
@@ -251,6 +180,8 @@ app.listen(PORT, '0.0.0.0', () => {
 // Xử lý tắt server
 process.on('SIGINT', () => {
   console.log('\nShutting down server...');
-  wss.close();
+  if (mqttClient) {
+    mqttClient.end();
+  }
   process.exit(0);
 });
