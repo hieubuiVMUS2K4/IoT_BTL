@@ -13,15 +13,27 @@
 #include <ESP8266HTTPClient.h>
 #include <Wire.h>
 #include <ArduinoJson.h>
+#include <PubSubClient.h>
 
 // ===== CẤU HÌNH WIFI =====
-const char* ssid = "Khaidepzai";          // Thay bằng tên WiFi của bạn
-const char* password = "hieuhieuhoangkhai";   // Thay bằng mật khẩu WiFi
+const char* ssid = "tinhvdth";          // Thay bằng tên WiFi của bạn
+const char* password = "123456789tt";   // Thay bằng mật khẩu WiFi
 
-// ===== CẤU HÌNH SERVER =====
-const char* serverIP = "192.168.1.220";  // Thay bằng IP máy tính chạy Node.js server
-const int serverPort = 3000;
-String serverURL = "http://" + String(serverIP) + ":" + String(serverPort);
+// ===== CẤU HÌNH MQTT =====
+const char* mqttServer = "10.137.147.176";  // IP máy tính chạy MQTT broker
+const int mqttPort = 1883;
+const char* mqttUser = "";              // Username (nếu có)
+const char* mqttPassword = "";          // Password (nếu có)
+const char* mqttClientId = "esp8266-iot-001";
+
+// MQTT Topics
+const char* topicTemperature = "/iot/smarthome/sensors/temperature";
+const char* topicMotion = "/iot/smarthome/sensors/motion";
+const char* topicDoor = "/iot/smarthome/sensors/door";
+const char* topicDistance = "/iot/smarthome/sensors/distance";
+const char* topicStatus = "/iot/smarthome/status/esp8266";
+const char* topicLed2 = "/iot/smarthome/commands/led2";
+const char* topicDoorCmd = "/iot/smarthome/commands/door";
 
 // ===== CẤU HÌNH I2C =====
 #define SLAVE1_ADDRESS 8  // Arduino Uno 1
@@ -50,8 +62,61 @@ Slave2Data slave2Data;
 
 // ===== BIẾN ĐIỀU KHIỂN =====
 WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
 unsigned long lastUpdate = 0;
 const unsigned long updateInterval = 2000;  // Gửi dữ liệu mỗi 2 giây
+unsigned long lastMqttReconnect = 0;
+const unsigned long mqttReconnectInterval = 5000;  // Thử kết nối MQTT mỗi 5 giây
+
+// ===== MQTT CALLBACK =====
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("MQTT Message arrived [");
+  Serial.print(topic);
+  Serial.print("]: ");
+
+  // Convert payload to string
+  char message[length + 1];
+  memcpy(message, payload, length);
+  message[length] = '\0';
+  Serial.println(message);
+
+  // Parse JSON message
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, message);
+
+  if (error) {
+    Serial.print("JSON parse error: ");
+    Serial.println(error.c_str());
+    return;
+  }
+
+  // Handle commands
+  if (strcmp(topic, topicLed2) == 0) {
+    const char* action = doc["action"];
+    if (strcmp(action, "on") == 0) {
+      sendCommandToSlave1(0x01);  // Turn LED 2 ON
+      Serial.println("LED2 ON command received");
+    } else if (strcmp(action, "off") == 0) {
+      sendCommandToSlave1(0x02);  // Turn LED 2 OFF
+      Serial.println("LED2 OFF command received");
+    } else if (strcmp(action, "toggle") == 0) {
+      sendCommandToSlave1(0x03);  // Toggle LED 2
+      Serial.println("LED2 TOGGLE command received");
+    }
+  } else if (strcmp(topic, topicDoorCmd) == 0) {
+    const char* action = doc["action"];
+    if (strcmp(action, "open") == 0) {
+      sendCommandToSlave2(0x10);  // Open door
+      Serial.println("DOOR OPEN command received");
+    } else if (strcmp(action, "close") == 0) {
+      sendCommandToSlave2(0x11);  // Close door
+      Serial.println("DOOR CLOSE command received");
+    } else if (strcmp(action, "toggle") == 0) {
+      sendCommandToSlave2(0x12);  // Toggle door
+      Serial.println("DOOR TOGGLE command received");
+    }
+  }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -79,35 +144,69 @@ void setup() {
   
   // Kết nối WiFi
   connectWiFi();
-  
+
+  // Khởi tạo MQTT
+  mqttClient.setServer(mqttServer, mqttPort);
+  mqttClient.setCallback(mqttCallback);
+
   Serial.println("System ready!");
 }
 
 void loop() {
-  // Kiểm tra kết nối WiFi
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi disconnected, reconnecting...");
-    connectWiFi();
+   // Kiểm tra kết nối WiFi
+   if (WiFi.status() != WL_CONNECTED) {
+     Serial.println("WiFi disconnected, reconnecting...");
+     connectWiFi();
+   }
+
+   // Kiểm tra kết nối MQTT
+   if (!mqttClient.connected()) {
+     if (millis() - lastMqttReconnect > mqttReconnectInterval) {
+       reconnectMQTT();
+       lastMqttReconnect = millis();
+     }
+   } else {
+     mqttClient.loop();  // Xử lý MQTT messages
+   }
+
+   // Thu thập dữ liệu từ Slave 1
+   readSlave1Data();
+   delay(100);  // Tăng delay giữa các lần đọc
+
+   // Thu thập dữ liệu từ Slave 2
+   readSlave2Data();
+   delay(100);  // Tăng delay giữa các lần đọc
+
+   // Gửi dữ liệu lên MQTT broker
+   if (millis() - lastUpdate > updateInterval) {
+     publishSensorData();
+     lastUpdate = millis();
+   }
+
+   delay(500);
+}
+
+// ===== KẾT NỐI MQTT =====
+void reconnectMQTT() {
+  Serial.print("Attempting MQTT connection...");
+
+  if (mqttClient.connect(mqttClientId, mqttUser, mqttPassword)) {
+    Serial.println("connected");
+
+    // Subscribe to command topics
+    mqttClient.subscribe(topicLed2);
+    mqttClient.subscribe(topicDoorCmd);
+
+    Serial.println("Subscribed to command topics");
+
+    // Publish online status
+    mqttClient.publish(topicStatus, "{\"status\":\"online\"}", true);
+
+  } else {
+    Serial.print("failed, rc=");
+    Serial.print(mqttClient.state());
+    Serial.println(" try again in 5 seconds");
   }
-  
-  // Thu thập dữ liệu từ Slave 1
-  readSlave1Data();
-  delay(100);  // Tăng delay giữa các lần đọc
-  
-  // Thu thập dữ liệu từ Slave 2
-  readSlave2Data();
-  delay(100);  // Tăng delay giữa các lần đọc
-  
-  // Gửi dữ liệu lên server
-  if (millis() - lastUpdate > updateInterval) {
-    sendDataToServer();
-    lastUpdate = millis();
-  }
-  
-  // Kiểm tra lệnh từ server
-  checkServerCommands();
-  
-  delay(500);
 }
 
 // ===== KẾT NỐI WIFI =====
@@ -237,124 +336,59 @@ void readSlave2Data() {
   }
 }
 
-// ===== GỬI DỮ LIỆU LÊN SERVER =====
-void sendDataToServer() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi not connected, skipping data send");
+// ===== PUBLISH DỮ LIỆU LÊN MQTT =====
+void publishSensorData() {
+  if (!mqttClient.connected()) {
+    Serial.println("MQTT not connected, skipping data publish");
     return;
   }
-  
-  HTTPClient http;
-  
-  // Tạo JSON payload
-  StaticJsonDocument<512> doc;
-  
-  // Slave 1 data
-  doc["pir"] = slave1Data.pirState;
-  doc["led1"] = slave1Data.led1State;
-  doc["led2"] = slave1Data.led2State;
-  doc["temperature"] = slave1Data.temperature;
-  doc["humidity"] = slave1Data.humidity;
-  
-  // Slave 2 data
-  doc["door"] = slave2Data.doorOpen;
-  doc["autoOpen"] = slave2Data.autoOpenActive;  // Trạng thái tự động mở
-  doc["rfid"] = slave2Data.rfidAccess;
-  doc["distance"] = slave2Data.distance;
-  
-  // Timestamp
-  doc["timestamp"] = millis();
-  
-  String jsonString;
-  serializeJson(doc, jsonString);
-  
-  Serial.println("\n=== Sending data to server ===");
-  Serial.println(jsonString);
-  
-  // Gửi POST request
-  http.begin(wifiClient, serverURL + "/api/data");
-  http.addHeader("Content-Type", "application/json");
-  
-  int httpCode = http.POST(jsonString);
-  
-  if (httpCode > 0) {
-    Serial.print("HTTP Response code: ");
-    Serial.println(httpCode);
-    
-    if (httpCode == HTTP_CODE_OK) {
-      String response = http.getString();
-      Serial.println("Response: " + response);
-    }
-  } else {
-    Serial.print("HTTP Error: ");
-    Serial.println(http.errorToString(httpCode));
-  }
-  
-  http.end();
+
+  Serial.println("\n=== Publishing sensor data to MQTT ===");
+
+  // Publish temperature & humidity
+  StaticJsonDocument<128> tempDoc;
+  tempDoc["temperature"] = slave1Data.temperature;
+  tempDoc["humidity"] = slave1Data.humidity;
+  tempDoc["timestamp"] = millis();
+
+  String tempPayload;
+  serializeJson(tempDoc, tempPayload);
+  mqttClient.publish(topicTemperature, tempPayload.c_str(), true);  // Retained
+  Serial.println("Published temperature: " + tempPayload);
+
+  // Publish motion sensor
+  StaticJsonDocument<64> motionDoc;
+  motionDoc["motion"] = slave1Data.pirState;
+  motionDoc["timestamp"] = millis();
+
+  String motionPayload;
+  serializeJson(motionDoc, motionPayload);
+  mqttClient.publish(topicMotion, motionPayload.c_str(), true);  // Retained
+  Serial.println("Published motion: " + motionPayload);
+
+  // Publish door status
+  StaticJsonDocument<128> doorDoc;
+  doorDoc["door"] = slave2Data.doorOpen;
+  doorDoc["autoOpen"] = slave2Data.autoOpenActive;
+  doorDoc["rfid"] = slave2Data.rfidAccess;
+  doorDoc["timestamp"] = millis();
+
+  String doorPayload;
+  serializeJson(doorDoc, doorPayload);
+  mqttClient.publish(topicDoor, doorPayload.c_str(), true);  // Retained
+  Serial.println("Published door: " + doorPayload);
+
+  // Publish distance
+  StaticJsonDocument<64> distDoc;
+  distDoc["distance"] = slave2Data.distance;
+  distDoc["timestamp"] = millis();
+
+  String distPayload;
+  serializeJson(distDoc, distPayload);
+  mqttClient.publish(topicDistance, distPayload.c_str(), true);  // Retained
+  Serial.println("Published distance: " + distPayload);
 }
 
-// ===== KIỂM TRA LỆNH TỪ SERVER =====
-void checkServerCommands() {
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
-  }
-  
-  HTTPClient http;
-  
-  http.begin(wifiClient, serverURL + "/api/commands");
-  int httpCode = http.GET();
-  
-  if (httpCode == HTTP_CODE_OK) {
-    String payload = http.getString();
-    
-    if (payload.length() > 2) {  // Không phải "{}"
-      Serial.println("\n=== Received commands from server ===");
-      Serial.println(payload);
-      
-      // Parse JSON
-      StaticJsonDocument<256> doc;
-      DeserializationError error = deserializeJson(doc, payload);
-      
-      if (!error) {
-        // Xử lý lệnh LED 1
-        if (doc.containsKey("led1")) {
-          const char* led1Cmd = doc["led1"];
-          if (strcmp(led1Cmd, "on") == 0) {
-            sendCommandToSlave1(0x04);
-          } else if (strcmp(led1Cmd, "off") == 0) {
-            sendCommandToSlave1(0x05);
-          }
-        }
-        
-        // Xử lý lệnh LED 2
-        if (doc.containsKey("led2")) {
-          const char* led2Cmd = doc["led2"];
-          if (strcmp(led2Cmd, "on") == 0) {
-            sendCommandToSlave1(0x01);
-          } else if (strcmp(led2Cmd, "off") == 0) {
-            sendCommandToSlave1(0x02);
-          } else if (strcmp(led2Cmd, "toggle") == 0) {
-            sendCommandToSlave1(0x03);
-          }
-        }
-        
-        // Xử lý lệnh cửa
-        if (doc.containsKey("door")) {
-          const char* doorCmd = doc["door"];
-          if (strcmp(doorCmd, "open") == 0) {
-            sendCommandToSlave2(0x10);
-          } else if (strcmp(doorCmd, "close") == 0) {
-            sendCommandToSlave2(0x11);
-          } else if (strcmp(doorCmd, "toggle") == 0) {
-            sendCommandToSlave2(0x12);
-          }
-        }
-      }
-    }
-  }
-  
-  http.end();
-}
 
 // ===== SCAN I2C BUS =====
 void scanI2C() {

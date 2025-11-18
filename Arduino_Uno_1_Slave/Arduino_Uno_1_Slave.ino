@@ -296,8 +296,7 @@ void processCommand() {
       Serial.println("🌐 WEB: LED 2 TOGGLE (manual mode 30s)");
       break;
       
-    // LED 1 KHÔNG CÓ LỆNH ĐIỀU KHIỂN - CHỈ TỰ ĐỘNG BỞI PIR
-    // case 0x04 và 0x05 ĐÃ BỊ XÓA
+   
       
     default:
       Serial.print("⚠️ Unknown command: 0x");

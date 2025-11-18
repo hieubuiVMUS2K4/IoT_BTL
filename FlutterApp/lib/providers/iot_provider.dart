@@ -10,46 +10,80 @@ class IoTProvider with ChangeNotifier {
   IoTData _data = IoTData.initial();
   bool _isConnected = false;
   bool _isLoading = false;
-  StreamSubscription? _wsSubscription;
 
   IoTData get data => _data;
   bool get isConnected => _isConnected;
   bool get isLoading => _isLoading;
 
-  // Kết nối WebSocket
-  void connectWebSocket() {
+  // Kết nối MQTT
+  Future<void> connectMQTT() async {
     try {
-      final channel = _iotService.connectWebSocket();
-      
-      _wsSubscription = channel.stream.listen(
-        (message) {
-          try {
-            final jsonData = jsonDecode(message);
-            if (jsonData['type'] == 'update' || jsonData['type'] == 'init') {
-              _updateData(jsonData['data']);
-            }
-          } catch (e) {
-            print('Error parsing WebSocket message: $e');
-          }
-        },
-        onError: (error) {
-          print('WebSocket error: $error');
-          _isConnected = false;
-          notifyListeners();
-        },
-        onDone: () {
-          print('WebSocket disconnected');
-          _isConnected = false;
-          notifyListeners();
-        },
-      );
-
-      _isConnected = true;
+      final success = await _iotService.connectMQTT(_onMQTTMessage);
+      if (success) {
+        _isConnected = true;
+        print('MQTT connected successfully');
+      } else {
+        _isConnected = false;
+        print('MQTT connection failed');
+      }
       notifyListeners();
     } catch (e) {
-      print('Error connecting WebSocket: $e');
+      print('Error connecting MQTT: $e');
       _isConnected = false;
       notifyListeners();
+    }
+  }
+
+  // Xử lý MQTT message
+  void _onMQTTMessage(String topic, String payload) {
+    try {
+      final jsonData = jsonDecode(payload);
+
+      if (topic.startsWith('/iot/smarthome/sensors/')) {
+        _updateDataFromMQTT(topic, jsonData);
+      }
+    } catch (e) {
+      print('Error parsing MQTT message: $e');
+    }
+  }
+
+  // Cập nhật dữ liệu từ MQTT
+  void _updateDataFromMQTT(String topic, Map<String, dynamic> jsonData) {
+    try {
+      switch (topic.split('/').last) {
+        case 'temperature':
+          _data = _data.copyWith(
+            temperature: (jsonData['temperature'] ?? 0).toDouble(),
+            humidity: (jsonData['humidity'] ?? 0).toDouble(),
+          );
+          break;
+        case 'motion':
+          _data = _data.copyWith(
+            pirActive: jsonData['motion'] ?? false,
+          );
+          break;
+        case 'door':
+          _data = _data.copyWith(
+            doorOpen: jsonData['door'] ?? false,
+            autoOpen: jsonData['autoOpen'] ?? false,
+            rfidAccess: jsonData['rfid'] ?? false,
+          );
+          break;
+        case 'distance':
+          _data = _data.copyWith(
+            distance: (jsonData['distance'] ?? 0).toDouble(),
+          );
+          break;
+      }
+
+      _data = _data.copyWith(
+        timestamp: DateTime.now(),
+        online: true,
+      );
+
+      notifyListeners();
+    } catch (e) {
+      print('Error updating data from MQTT: $e');
     }
   }
 
@@ -131,8 +165,7 @@ class IoTProvider with ChangeNotifier {
 
   // Ngắt kết nối
   void disconnect() {
-    _wsSubscription?.cancel();
-    _iotService.disconnectWebSocket();
+    _iotService.disconnectMQTT();
     _isConnected = false;
     notifyListeners();
   }

@@ -27,8 +27,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _initializeConnection() async {
     final iotProvider = Provider.of<IoTProvider>(context, listen: false);
     
-    // Kết nối WebSocket
-    iotProvider.connectWebSocket();
+    // Kết nối MQTT
+    await iotProvider.connectMQTT();
     
     // Fetch dữ liệu ban đầu
     await iotProvider.fetchCurrentData();

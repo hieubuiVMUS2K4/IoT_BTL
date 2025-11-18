@@ -283,8 +283,7 @@ void measureDistance() {
   lastMeasure = millis();
 }
 
-// ===== PHÁT HIỆN ĐỘT NHẬP (TỰ ĐỘNG CẢNH BÁO) =====
-// Nếu khoảng cách < 50cm VÀ cửa đang đóng → CẢNH BÁO ĐỘT NHẬP
+
 // ===== TỰ ĐỘNG MỞ CỬA KHI PHÁT HIỆN NGƯỜI =====
 // Nếu khoảng cách < 10cm (người đến gần) → TỰ ĐỘNG MỞ CỬA
 // Chỉ hoạt động khi không ở chế độ manual

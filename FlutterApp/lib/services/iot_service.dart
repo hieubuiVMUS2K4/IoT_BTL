@@ -1,29 +1,86 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_server_client.dart';
 import '../models/iot_data_model.dart';
 
 class IoTService {
-  final String baseUrl;
-  final String wsUrl;
-  
-  WebSocketChannel? _channel;
+   final String baseUrl;
+   final String mqttUrl;
+   final int mqttPort;
 
-  IoTService({
-    this.baseUrl = 'http://192.168.1.220:3000', // Thay IP của PC
-    this.wsUrl = 'ws://192.168.1.220:3001',
-  });
+   MqttServerClient? _mqttClient;
+   Function(String topic, String payload)? _onMessageReceived;
 
-  // Kết nối WebSocket
-  WebSocketChannel connectWebSocket() {
-    _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-    return _channel!;
+   IoTService({
+     this.baseUrl = 'http://10.137.147.176:3000', // Thay IP của PC
+     this.mqttUrl = '10.137.147.176', // MQTT broker IP
+     this.mqttPort = 1883,
+   });
+
+  // Kết nối MQTT
+  Future<bool> connectMQTT(Function(String topic, String payload) onMessageReceived) async {
+    _onMessageReceived = onMessageReceived;
+
+    _mqttClient = MqttServerClient(mqttUrl, 'flutter-client-${DateTime.now().millisecondsSinceEpoch}');
+    _mqttClient!.port = mqttPort;
+    _mqttClient!.logging(on: false);
+    _mqttClient!.keepAlivePeriod = 20;
+    _mqttClient!.onDisconnected = _onDisconnected;
+    _mqttClient!.onConnected = _onConnected;
+    _mqttClient!.onSubscribed = _onSubscribed;
+
+    final connMessage = MqttConnectMessage()
+        .withClientIdentifier('flutter-client-${DateTime.now().millisecondsSinceEpoch}')
+        .startClean()
+        .withWillQos(MqttQos.atMostOnce);
+
+    _mqttClient!.connectionMessage = connMessage;
+
+    try {
+      await _mqttClient!.connect();
+      return true;
+    } catch (e) {
+      print('MQTT connection failed: $e');
+      return false;
+    }
   }
 
-  // Ngắt kết nối WebSocket
-  void disconnectWebSocket() {
-    _channel?.sink.close();
-    _channel = null;
+  // Ngắt kết nối MQTT
+  void disconnectMQTT() {
+    _mqttClient?.disconnect();
+    _mqttClient = null;
+  }
+
+  // MQTT event handlers
+  void _onConnected() {
+    print('MQTT Connected');
+    _subscribeToTopics();
+  }
+
+  void _onDisconnected() {
+    print('MQTT Disconnected');
+  }
+
+  void _onSubscribed(String topic) {
+    print('Subscribed to $topic');
+  }
+
+  void _subscribeToTopics() {
+    if (_mqttClient != null) {
+      _mqttClient!.subscribe('/iot/smarthome/sensors/#', MqttQos.atMostOnce);
+      _mqttClient!.updates!.listen(_onMessage);
+    }
+  }
+
+  void _onMessage(List<MqttReceivedMessage<MqttMessage>> event) {
+    final MqttPublishMessage recMess = event[0].payload as MqttPublishMessage;
+    final String topic = event[0].topic;
+    final String payload = MqttPublishPayload.bytesToStringAsString(recMess.payload.message);
+
+    if (_onMessageReceived != null) {
+      _onMessageReceived!(topic, payload);
+    }
   }
 
   // Lấy dữ liệu hiện tại qua HTTP
