@@ -26,9 +26,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _initializeConnection() async {
     final iotProvider = Provider.of<IoTProvider>(context, listen: false);
-
-    // Kết nối MQTT - data will be received automatically via subscriptions
-    await iotProvider.connectMQTT();
+    
+    // Kết nối WebSocket
+    iotProvider.connectWebSocket();
+    
+    // Fetch dữ liệu ban đầu
+    await iotProvider.fetchCurrentData();
   }
 
   @override
@@ -38,17 +41,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _handleRefresh() async {
-    // Data is updated in real-time via MQTT, no need to manually refresh
-    // Just show a brief message to indicate the system is working
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Dữ liệu được cập nhật tự động qua MQTT'),
-          duration: Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
+    final iotProvider = Provider.of<IoTProvider>(context, listen: false);
+    await iotProvider.fetchCurrentData();
   }
 
   void _handleLogout() async {
@@ -251,6 +245,94 @@ class _HomeScreenState extends State<HomeScreen> {
                     
                     const SizedBox(height: 24),
                     
+                    // Fan Controls
+                    ControlCard(
+                      title: 'Điều khiển quạt',
+                      icon: Icons.air,
+                      children: [
+                        // Trạng thái quạt
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: iotProvider.data.fan 
+                                ? Colors.blue.withOpacity(0.1)
+                                : Colors.grey.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                iotProvider.data.fan ? Icons.toys : Icons.toys_outlined,
+                                color: iotProvider.data.fan ? Colors.blue : Colors.grey,
+                                size: 32,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      iotProvider.data.fan ? 'Đang bật' : 'Đang tắt',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                    Text(
+                                      iotProvider.data.fanAuto 
+                                          ? '🤖 Chế độ tự động (>30°C)'
+                                          : '👤 Chế độ thủ công',
+                                      style: TextStyle(
+                                        color: Colors.grey[600],
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        // Buttons điều khiển
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildControlButton(
+                                context,
+                                'Bật',
+                                Icons.power_settings_new,
+                                Colors.blue,
+                                () => _controlFan('on'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _buildControlButton(
+                                context,
+                                'Tắt',
+                                Icons.power_off,
+                                Colors.grey,
+                                () => _controlFan('off'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _buildControlButton(
+                                context,
+                                'Toggle',
+                                Icons.cached,
+                                Colors.teal,
+                                () => _controlFan('toggle'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ).animate().fadeIn(delay: 350.ms),
+                    
+                    const SizedBox(height: 24),
+                    
                     // Door Section
                     Text(
                       'Điều khiển cửa',
@@ -407,6 +489,22 @@ class _HomeScreenState extends State<HomeScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(success ? 'Đã gửi lệnh $action cửa' : 'Lỗi kết nối'),
+        backgroundColor: success ? Colors.green : Colors.red,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _controlFan(String action) async {
+    final iotProvider = Provider.of<IoTProvider>(context, listen: false);
+    final success = await iotProvider.controlFan(action);
+    
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(success ? 'Đã gửi lệnh $action quạt' : 'Lỗi kết nối'),
         backgroundColor: success ? Colors.green : Colors.red,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),

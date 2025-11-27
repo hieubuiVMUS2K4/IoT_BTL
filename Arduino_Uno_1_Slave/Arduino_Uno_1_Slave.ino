@@ -22,6 +22,11 @@
 #define LED_BUTTON_PIN 10
 #define BUTTON_PIN 12
 
+// ===== CẤU HÌNH QUẠT L298N =====
+#define FAN_ENA_PIN 6    // PWM cho tốc độ quạt
+#define FAN_IN1_PIN 7    // Hướng quay 1
+#define FAN_IN2_PIN 8    // Hướng quay 2
+
 // ===== CẤU HÌNH DHT =====
 #define DHTTYPE DHT11  // Hoặc DHT22
 DHT dht(DHT_PIN, DHTTYPE);
@@ -32,6 +37,14 @@ bool led1State = false;  // LED PIR
 bool led2State = false;  // LED Button
 float temperature = 0.0;
 float humidity = 0.0;
+
+// ===== BIẾN QUẠT =====
+bool fanState = false;           // Trạng thái quạt (bật/tắt)
+bool fanAutoMode = true;         // Chế độ tự động theo nhiệt độ
+int fanSpeed = 255;              // Tốc độ quạt (0-255)
+const float TEMP_THRESHOLD = 30.0;  // Ngưỡng nhiệt độ 30°C
+unsigned long fanManualTimeout = 0;
+const unsigned long fanManualDuration = 60000;  // 60s manual mode
 
 // ===== BIẾN BUTTON =====
 bool lastButtonState = HIGH;
@@ -61,6 +74,9 @@ volatile unsigned long requestCount = 0;  // Đếm số lần requestEvent đư
 // 0x01: Bật LED 2
 // 0x02: Tắt LED 2
 // 0x03: Toggle LED 2
+// 0x07: Bật quạt (manual) - FIXED từ 0x04 tránh xung đột LED1
+// 0x08: Tắt quạt (manual) - FIXED từ 0x05
+// 0x09: Toggle quạt - FIXED từ 0x06
 // (LED 1 KHÔNG có lệnh điều khiển - chỉ tự động bởi PIR)
 
 void setup() {
@@ -81,9 +97,19 @@ void setup() {
   pinMode(LED_BUTTON_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   
+  // Khởi tạo chân quạt L298N
+  pinMode(FAN_ENA_PIN, OUTPUT);
+  pinMode(FAN_IN1_PIN, OUTPUT);
+  pinMode(FAN_IN2_PIN, OUTPUT);
+  
   // Tắt LED ban đầu
   digitalWrite(LED_PIR_PIN, LOW);
   digitalWrite(LED_BUTTON_PIN, LOW);
+  
+  // Tắt quạt ban đầu
+  digitalWrite(FAN_IN1_PIN, LOW);
+  digitalWrite(FAN_IN2_PIN, LOW);
+  analogWrite(FAN_ENA_PIN, 0);
   
   // Khởi tạo DHT
   dht.begin();
@@ -121,7 +147,10 @@ void loop() {
   // ===== 3. ĐỌC CẢM BIẾN NHIỆT ẨM DHT =====
   readDHT();
   
-  // ===== 4. XỬ LÝ LỆNH TỪ ESP8266 (ĐIỀU KHIỂN TỪ XA) =====
+  // ===== 4. XỨ LÝ QUẠT TỰ ĐỘNG THEO NHIỆT ĐỘ =====
+  handleFan();
+  
+  // ===== 5. XỨ LÝ LỆNH TỪ ESP8266 (ĐIỀU KHIỂN TỪ XA) =====
   processCommand();
   
   delay(100);  // Delay nhỏ để tránh quá tải
@@ -239,25 +268,98 @@ void handlePIR() {
   lastPirValue = reading;
 }
 
+// ===== XỨ LÝ QUẠT TỰ ĐỘNG =====
+// Tự động bật quạt khi nhiệt độ > 30°C
+// Manual mode có thời hạn 60 giây
+void handleFan() {
+  // Kiểm tra manual mode timeout
+  if (!fanAutoMode && (millis() - fanManualTimeout > fanManualDuration)) {
+    fanAutoMode = true;
+    Serial.println("⏰ Fan: Back to AUTO mode");
+  }
+  
+  // Chế độ tự động
+  if (fanAutoMode) {
+    if (temperature >= TEMP_THRESHOLD && !fanState) {
+      // Nhiệt độ cao, bật quạt
+      turnOnFan();
+      Serial.print("🌡️ AUTO FAN ON: Temp=");
+      Serial.print(temperature);
+      Serial.println("°C");
+    } else if (temperature < (TEMP_THRESHOLD - 2.0) && fanState) {
+      // Nhiệt độ giảm (hysteresis 2°C), tắt quạt
+      turnOffFan();
+      Serial.print("❄️ AUTO FAN OFF: Temp=");
+      Serial.print(temperature);
+      Serial.println("°C");
+    }
+  }
+}
+
+// ===== BẬT QUẠT =====
+void turnOnFan() {
+  fanState = true;
+  
+  // CRITICAL: Set direction FIRST, then enable PWM
+  digitalWrite(FAN_IN1_PIN, HIGH);
+  digitalWrite(FAN_IN2_PIN, LOW);
+  delay(10);  // Short delay to stabilize
+  
+  // Use direct 255 value (full speed)
+  analogWrite(FAN_ENA_PIN, 255);
+  
+  // DEBUG: Kiểm tra trạng thái các chân
+  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  Serial.println("🔧 FAN ON DEBUG:");
+  Serial.println("   ENA (D6) PWM: 255 (FULL SPEED)");
+  Serial.print("   IN1 (D7): ");
+  Serial.println(digitalRead(FAN_IN1_PIN) ? "HIGH" : "LOW");
+  Serial.print("   IN2 (D8): ");
+  Serial.println(digitalRead(FAN_IN2_PIN) ? "HIGH" : "LOW");
+  Serial.println("   ⚠️ CHECK: L298N ENA jumper REMOVED?");
+  Serial.println("   ⚠️ CHECK: 12V power to L298N?");
+  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+}
+
+// ===== TẮT QUẠT =====
+void turnOffFan() {
+  fanState = false;
+  // FIXED: Set hướng = LOW trước để tránh quạt giật
+  digitalWrite(FAN_IN1_PIN, LOW);
+  digitalWrite(FAN_IN2_PIN, LOW);
+  analogWrite(FAN_ENA_PIN, 0);  // Tắt PWM sau cùng
+  
+  Serial.println("⚫ FAN OFF - All pins set to LOW/0");
+}
+
 // ===== ĐỌC CẢM BIẾN DHT =====
 void readDHT() {
   static unsigned long lastRead = 0;
+  static float lastValidTemp = 25.0;  // FIXED: Lưu giá trị hợp lệ trước đó
+  static float lastValidHum = 50.0;
   
   // Đọc DHT mỗi 2 giây
   if (millis() - lastRead > 2000) {
     float h = dht.readHumidity();
     float t = dht.readTemperature();
     
-    if (!isnan(h) && !isnan(t)) {
-      humidity = h;
-      temperature = t;
-      Serial.print("Temp: ");
-      Serial.print(temperature);
-      Serial.print("°C, Humidity: ");
-      Serial.print(humidity);
-      Serial.println("%");
+    // FIXED: Chống nhiễu - chỉ cập nhật nếu hợp lệ và thay đổi > 0.5°C
+    if (!isnan(h) && !isnan(t) && t > 0 && t < 100 && h > 0 && h < 100) {
+      // Chỉ cập nhật nếu thay đổi đáng kể (tránh nhiễu nhỏ)
+      if (abs(t - lastValidTemp) > 0.5 || abs(h - lastValidHum) > 1.0) {
+        humidity = h;
+        temperature = t;
+        lastValidTemp = t;
+        lastValidHum = h;
+        Serial.print("Temp: ");
+        Serial.print(temperature);
+        Serial.print("°C, Humidity: ");
+        Serial.print(humidity);
+        Serial.println("%");
+      }
     } else {
-      Serial.println("Failed to read DHT sensor");
+      Serial.println("⚠ DHT read error - using last valid value");
+      // Giữ nguyên giá trị cũ, không cập nhật
     }
     
     lastRead = millis();
@@ -295,6 +397,28 @@ void processCommand() {
       manualLED2Timeout = millis();
       Serial.println("🌐 WEB: LED 2 TOGGLE (manual mode 30s)");
       break;
+    
+    case 0x07:  // Bật quạt (manual) - FIXED từ 0x04
+      fanAutoMode = false;
+      fanManualTimeout = millis();
+      turnOnFan();
+      Serial.println("🌐 WEB: FAN ON (manual 60s)");
+      break;
+    
+    case 0x08:  // Tắt quạt (manual) - FIXED từ 0x05
+      fanAutoMode = false;
+      fanManualTimeout = millis();
+      turnOffFan();
+      Serial.println("🌐 WEB: FAN OFF (manual 60s)");
+      break;
+    
+    case 0x09:  // Toggle quạt - FIXED từ 0x06
+      fanAutoMode = false;
+      fanManualTimeout = millis();
+      if (fanState) turnOffFan();
+      else turnOnFan();
+      Serial.println("🌐 WEB: FAN TOGGLE (manual 60s)");
+      break;
       
    
       
@@ -326,7 +450,11 @@ void requestEvent() {
   i2cBuffer[5] = (humInt >> 8) & 0xFF;
   i2cBuffer[6] = humInt & 0xFF;
   
-  Wire.write(i2cBuffer, 7);
+  // Thêm trạng thái quạt
+  i2cBuffer[7] = fanState ? 1 : 0;
+  i2cBuffer[8] = fanAutoMode ? 1 : 0;
+  
+  Wire.write(i2cBuffer, 9);  // Gửi 9 bytes (thêm 2 bytes quạt)
 }
 
 // ===== I2C RECEIVE EVENT =====

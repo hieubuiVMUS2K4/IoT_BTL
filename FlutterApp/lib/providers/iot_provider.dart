@@ -10,86 +10,46 @@ class IoTProvider with ChangeNotifier {
   IoTData _data = IoTData.initial();
   bool _isConnected = false;
   bool _isLoading = false;
+  StreamSubscription? _wsSubscription;
 
   IoTData get data => _data;
   bool get isConnected => _isConnected;
   bool get isLoading => _isLoading;
 
-  // Kết nối MQTT
-  Future<void> connectMQTT() async {
+  // Kết nối WebSocket
+  void connectWebSocket() {
     try {
-      final success = await _iotService.connectMQTT(_onMQTTMessage);
-      if (success) {
-        _isConnected = true;
-        print('MQTT connected successfully');
-      } else {
-        _isConnected = false;
-        print('MQTT connection failed');
-      }
-      notifyListeners();
-    } catch (e) {
-      print('Error connecting MQTT: $e');
-      _isConnected = false;
-      notifyListeners();
-    }
-  }
-
-  // Xử lý MQTT message
-  void _onMQTTMessage(String topic, String payload) {
-    try {
-      final jsonData = jsonDecode(payload);
-
-      if (topic == '/iot/smarthome/updates') {
-        // System update from server (full data)
-        if (jsonData['type'] == 'update' && jsonData['data'] != null) {
-          _updateData(jsonData['data']);
-        }
-      } else if (topic.startsWith('/iot/smarthome/sensors/')) {
-        // Individual sensor updates
-        _updateDataFromMQTT(topic, jsonData);
-      }
-    } catch (e) {
-      print('Error parsing MQTT message: $e');
-    }
-  }
-
-  // Cập nhật dữ liệu từ MQTT
-  void _updateDataFromMQTT(String topic, Map<String, dynamic> jsonData) {
-    try {
-      switch (topic.split('/').last) {
-        case 'temperature':
-          _data = _data.copyWith(
-            temperature: (jsonData['temperature'] ?? 0).toDouble(),
-            humidity: (jsonData['humidity'] ?? 0).toDouble(),
-          );
-          break;
-        case 'motion':
-          _data = _data.copyWith(
-            pirActive: jsonData['motion'] ?? false,
-          );
-          break;
-        case 'door':
-          _data = _data.copyWith(
-            doorOpen: jsonData['door'] ?? false,
-            autoOpen: jsonData['autoOpen'] ?? false,
-            rfidAccess: jsonData['rfid'] ?? false,
-          );
-          break;
-        case 'distance':
-          _data = _data.copyWith(
-            distance: (jsonData['distance'] ?? 0).toDouble(),
-          );
-          break;
-      }
-
-      _data = _data.copyWith(
-        timestamp: DateTime.now(),
-        online: true,
+      final channel = _iotService.connectWebSocket();
+      
+      _wsSubscription = channel.stream.listen(
+        (message) {
+          try {
+            final jsonData = jsonDecode(message);
+            if (jsonData['type'] == 'update' || jsonData['type'] == 'init') {
+              _updateData(jsonData['data']);
+            }
+          } catch (e) {
+            print('Error parsing WebSocket message: $e');
+          }
+        },
+        onError: (error) {
+          print('WebSocket error: $error');
+          _isConnected = false;
+          notifyListeners();
+        },
+        onDone: () {
+          print('WebSocket disconnected');
+          _isConnected = false;
+          notifyListeners();
+        },
       );
 
+      _isConnected = true;
       notifyListeners();
     } catch (e) {
-      print('Error updating data from MQTT: $e');
+      print('Error connecting WebSocket: $e');
+      _isConnected = false;
+      notifyListeners();
     }
   }
 
@@ -102,6 +62,8 @@ class IoTProvider with ChangeNotifier {
         pirActive: jsonData['pir'] ?? false,
         led1: jsonData['led1'] ?? false,
         led2: jsonData['led2'] ?? false,
+        fan: jsonData['fan'] ?? false,
+        fanAuto: jsonData['fanAuto'] ?? true,
         doorOpen: jsonData['door'] ?? false,
         autoOpen: jsonData['autoOpen'] ?? false,
         rfidAccess: jsonData['rfid'] ?? false,
@@ -115,37 +77,74 @@ class IoTProvider with ChangeNotifier {
     }
   }
 
+  // Lấy dữ liệu hiện tại (fallback khi WebSocket lỗi)
+  Future<void> fetchCurrentData() async {
+    _isLoading = true;
+    notifyListeners();
 
-  // Điều khiển LED 2 (Direct MQTT publish for instant response)
+    try {
+      final newData = await _iotService.getCurrentData();
+      if (newData != null) {
+        _data = newData;
+        _isConnected = true;
+      }
+    } catch (e) {
+      print('Error fetching data: $e');
+      _isConnected = false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // Điều khiển LED 2
   Future<bool> controlLed2(String action) async {
     try {
-      final topic = '/iot/smarthome/commands/led2';
-      final payload = '{"action":"$action","timestamp":${DateTime.now().millisecondsSinceEpoch}}';
-      return await _iotService.publishMessage(topic, payload);
+      return await _iotService.controlLed2(action);
     } catch (e) {
       print('Error controlling LED2: $e');
       return false;
     }
   }
 
-  // Điều khiển cửa (Direct MQTT publish for instant response)
+  // Điều khiển cửa
   Future<bool> controlDoor(String action) async {
     try {
-      final topic = '/iot/smarthome/commands/door';
-      final payload = '{"action":"$action","timestamp":${DateTime.now().millisecondsSinceEpoch}}';
-      return await _iotService.publishMessage(topic, payload);
+      return await _iotService.controlDoor(action);
     } catch (e) {
       print('Error controlling door: $e');
       return false;
     }
   }
 
-  // MQTT connection status is managed automatically
-  // Connection status is updated via MQTT connection callbacks
+  // Điều khiển quạt
+  Future<bool> controlFan(String action) async {
+    try {
+      return await _iotService.controlFan(action);
+    } catch (e) {
+      print('Error controlling fan: $e');
+      return false;
+    }
+  }
+
+  // Kiểm tra kết nối
+  Future<bool> checkConnection() async {
+    try {
+      final result = await _iotService.checkConnection();
+      _isConnected = result;
+      notifyListeners();
+      return result;
+    } catch (e) {
+      _isConnected = false;
+      notifyListeners();
+      return false;
+    }
+  }
 
   // Ngắt kết nối
   void disconnect() {
-    _iotService.disconnectMQTT();
+    _wsSubscription?.cancel();
+    _iotService.disconnectWebSocket();
     _isConnected = false;
     notifyListeners();
   }

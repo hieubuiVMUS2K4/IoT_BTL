@@ -27,7 +27,7 @@
 #define SLAVE_ADDRESS 9
 #define BUTTON_OPEN_PIN A0
 #define BUTTON_CLOSE_PIN A1
-#define SERVO_PIN A2
+#define SERVO_PIN 6  // Đổi sang D6 (PWM)
 #define RST_PIN 9
 #define SS_PIN 10
 #define TRIG_PIN 4
@@ -35,8 +35,13 @@
 
 // ===== CẤU HÌNH SERVO =====
 Servo doorServo;
-const int DOOR_CLOSED_ANGLE = 0;
-const int DOOR_OPEN_ANGLE = 90;
+const int DOOR_CLOSED_ANGLE = 0;   // Cửa đóng
+const int DOOR_OPEN_ANGLE = 90;   // Cửa mở (tăng từ 90 lên 180 để đủ lực)
+bool servoMoving = false;
+int currentServoAngle = 0;
+int targetServoAngle = 0;
+unsigned long lastServoMoveTime = 0;
+const int SERVO_STEP_DELAY = 20;  // ms giữa mỗi bước (tăng từ 15 lên 20)
 
 // ===== CẤU HÌNH RFID =====
 MFRC522 mfrc522(SS_PIN, RST_PIN);
@@ -105,7 +110,11 @@ void setup() {
   // Khởi tạo Servo
   doorServo.attach(SERVO_PIN);
   doorServo.write(DOOR_CLOSED_ANGLE);  // Đóng cửa ban đầu
+  currentServoAngle = DOOR_CLOSED_ANGLE;
+  targetServoAngle = DOOR_CLOSED_ANGLE;
   doorOpen = false;
+  delay(500);  // Chờ servo về vị trí
+  doorServo.detach();  // Detach để tránh jitter
   
   SPI.begin();
   mfrc522.PCD_Init();
@@ -142,7 +151,10 @@ void loop() {
   // ===== 6. XỬ LÝ LỆNH TỪ ESP8266 (ĐIỀU KHIỂN TỪ XA) =====
   processCommand();
   
-  delay(100);
+  // ===== 7. CẬP NHẬT SERVO (SMOOTH MOVEMENT) =====
+  updateServo();
+  
+  delay(10);  // Giảm delay để servo mượt hơn
 }
 
 // ===== XỬ LÝ BUTTON VẬT LÝ =====
@@ -325,12 +337,43 @@ void handleAutoClose() {
   }
 }
 
+// ===== CẬP NHẬT SERVO (SMOOTH MOVEMENT) =====
+void updateServo() {
+  if (!servoMoving) return;
+  
+  if (millis() - lastServoMoveTime >= SERVO_STEP_DELAY) {
+    lastServoMoveTime = millis();
+    
+    // Attach servo trước khi di chuyển (nếu chưa attach)
+    if (!doorServo.attached()) {
+      doorServo.attach(SERVO_PIN);
+      delay(50);  // Chờ servo ổn định
+    }
+    
+    if (currentServoAngle < targetServoAngle) {
+      currentServoAngle++;
+      doorServo.write(currentServoAngle);
+    } else if (currentServoAngle > targetServoAngle) {
+      currentServoAngle--;
+      doorServo.write(currentServoAngle);
+    } else {
+      // Đã đến vị trí mục tiêu
+      servoMoving = false;
+      delay(300);  // Giữ vị trí ổn định
+      doorServo.detach();  // Detach để tránh jitter và tiết kiệm pin
+      Serial.print(F("Servo:Done@"));
+      Serial.println(currentServoAngle);
+    }
+  }
+}
+
 // ===== MỞ CỬA =====
 void openDoor() {
   if (!doorOpen) {
-    doorServo.write(DOOR_OPEN_ANGLE);
+    targetServoAngle = DOOR_OPEN_ANGLE;
+    servoMoving = true;
     doorOpen = true;
-    delay(500);
+    Serial.println(F("Door:Opening..."));
   }
 }
 
@@ -349,9 +392,10 @@ void openDoorWithAutoClose(unsigned long closeDelay, DoorSource source) {
 // ===== ĐÓNG CỬA =====
 void closeDoor() {
   if (doorOpen) {
-    doorServo.write(DOOR_CLOSED_ANGLE);
+    targetServoAngle = DOOR_CLOSED_ANGLE;
+    servoMoving = true;
     doorOpen = false;
-    delay(500);
+    Serial.println(F("Door:Closing..."));
   }
 }
 

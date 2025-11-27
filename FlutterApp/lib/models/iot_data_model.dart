@@ -9,6 +9,8 @@ class IoTData {
   final bool pirActive;
   final bool led1;
   final bool led2;
+  final bool fan;
+  final bool fanAuto;
   final bool doorOpen;
   final bool autoOpen;
   final bool rfidAccess;
@@ -22,6 +24,8 @@ class IoTData {
     required this.pirActive,
     required this.led1,
     required this.led2,
+    required this.fan,
+    required this.fanAuto,
     required this.doorOpen,
     required this.autoOpen,
     required this.rfidAccess,
@@ -56,6 +60,8 @@ class IoTData {
       pirActive: false,
       led1: false,
       led2: false,
+      fan: false,
+      fanAuto: true,
       doorOpen: false,
       autoOpen: false,
       rfidAccess: false,
@@ -71,6 +77,8 @@ class IoTData {
     bool? pirActive,
     bool? led1,
     bool? led2,
+    bool? fan,
+    bool? fanAuto,
     bool? doorOpen,
     bool? autoOpen,
     bool? rfidAccess,
@@ -84,6 +92,8 @@ class IoTData {
       pirActive: pirActive ?? this.pirActive,
       led1: led1 ?? this.led1,
       led2: led2 ?? this.led2,
+      fan: fan ?? this.fan,
+      fanAuto: fanAuto ?? this.fanAuto,
       doorOpen: doorOpen ?? this.doorOpen,
       autoOpen: autoOpen ?? this.autoOpen,
       rfidAccess: rfidAccess ?? this.rfidAccess,

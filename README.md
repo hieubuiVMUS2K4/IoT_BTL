@@ -1,10 +1,14 @@
-# 🏠 HỆ THỐNG IOT SMART HOME - MQTT VERSION
+# 🏠 HỆ THỐNG IOT SMART HOME
 ## ESP8266 + 2 Arduino Uno + Flutter Mobile App
 
-**Đồ án IoT - Hệ thống nhà thông minh đa nền tảng với MQTT Protocol**
+**Đồ án IoT - Hệ thống nhà thông minh đa nền tảng**
 
 ---
 
+cd "C:\Program Files\mosquitto"; Start-Process powershell -ArgumentList "-NoExit", "-Command", ".\mosquitto.exe -c 'C:\Users\hieuu\OneDrive\Desktop\btlIOT\mosquitto_iot.conf' -v"
+
+
+cd C:\Users\hieuu\OneDrive\Desktop\btlIOT\NodeJS_Server; Start-Process powershell -ArgumentList "-NoExit", "-Command", "node server_mqtt.js"
 ## 📋 TỔNG QUAN DỰ ÁN
 
 ### **Mô tả hệ thống**
@@ -15,7 +19,7 @@ Hệ thống IoT Smart Home là một giải pháp nhà thông minh hoàn chỉn
 - **Quản lý người dùng** với xác thực và phân quyền
 - **Đa nền tảng** hỗ trợ Web, Windows, Android
 
-### **Kiến trúc tổng thể - PURE MQTT**
+### **Kiến trúc tổng thể**
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        PRESENTATION LAYER                        │
@@ -23,30 +27,26 @@ Hệ thống IoT Smart Home là một giải pháp nhà thông minh hoàn chỉn
 │   Web Dashboard      │   Flutter Mobile App  │  Windows Desktop  │
 │   (HTML/CSS/JS)      │   (Dart/Flutter)      │  (Flutter)        │
 └──────────┬───────────┴───────────┬───────────┴───────────────────┘
-             │ MQTT Subscribe        │ MQTT Subscribe
-             ▼                       ▼
+           │ HTTP/WebSocket        │ HTTP/WebSocket
+           ▼                       ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │                        APPLICATION LAYER                         │
-│                Node.js MQTT Broker + REST API Server             │
-│  - Aedes MQTT Broker (port 1883)                                 │
-│  - Express.js (minimal HTTP endpoints)                           │
-│  - MQTT Client (sensor/command handling)                         │
+│                     Node.js REST API Server                      │
+│  - Express.js (HTTP endpoints)                                   │
+│  - WebSocket Server (Real-time communication)                    │
 │  - JSON Database (User authentication)                           │
-│  - Real-time MQTT broadcasting                                    │
 └──────────────────────┬──────────────────────────────────────────┘
-                         │ MQTT Publish/Subscribe (WiFi)
-                         ▼
+                       │ HTTP POST/GET (WiFi)
+                       ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │                      COMMUNICATION LAYER                         │
-│                    ESP8266 WiFi Master (I2C+MQTT)                │
+│                    ESP8266 WiFi Master (I2C)                     │
 │  - WiFi STA mode (2.4GHz)                                        │
 │  - I2C Master coordinator                                        │
-│  - MQTT Publisher (sensor data)                                  │
-│  - MQTT Subscriber (commands)                                    │
-│  - Event-driven command processing                               │
+│  - Data aggregation & command distribution                       │
 └────────┬──────────────────────────────┬─────────────────────────┘
-          │ I2C Protocol                 │ I2C Protocol
-          ▼                              ▼
+         │ I2C Protocol                 │ I2C Protocol
+         ▼                              ▼
 ┌────────────────────────┐    ┌────────────────────────┐
 │    HARDWARE LAYER      │    │    HARDWARE LAYER      │
 │   Arduino Uno 1        │    │   Arduino Uno 2        │
@@ -86,14 +86,14 @@ Hệ thống IoT Smart Home là một giải pháp nhà thông minh hoàn chỉn
 - 📱 **Đa nền tảng**: Android, iOS, Windows Desktop
 - 🔐 **Xác thực người dùng**: Login/Register với JSON database
 - 🎨 **Material Design 3**: Giao diện hiện đại, mượt mà
-- ⚡ **Real-time MQTT**: Tự động cập nhật sensor qua MQTT
+- ⚡ **Real-time**: WebSocket tự động cập nhật sensor
 - 📊 **Dashboard**: Hiển thị trực quan tất cả sensor
-- 🎮 **Control Panel**: Điều khiển LED, cửa qua MQTT publish
+- 🎮 **Control Panel**: Điều khiển LED, cửa từ mobile
 
 ### **5. Web Dashboard**
 - 🌐 **Responsive design**: Tương thích mọi thiết bị
 - 📊 **Biểu đồ realtime**: Chart.js visualization
-- 🔌 **MQTT Updates**: Cập nhật real-time qua MQTT subscriptions
+- 🔌 **WebSocket**: Cập nhật không cần refresh
 - 🎨 **UI/UX**: Clean, professional design
 
 ---
@@ -374,17 +374,17 @@ flutter pub get
    Windows: ipconfig
    Linux: ifconfig
    macOS: ifconfig
-
-4. Cấu hình MQTT Broker IP (dòng 22):
-   const char* mqttServer = "192.168.1.100";  // IP của PC chạy MQTT broker
-
+   
+4. Cấu hình Server IP (dòng 21):
+   const char* serverIP = "192.168.1.100";  // IP của PC
+   
 5. Tools → Board: "NodeMCU 1.0 (ESP-12E Module)"
 6. Tools → Port: COMx
 7. Upload
 8. Serial Monitor (115200 baud):
    - Kiểm tra kết nối WiFi
-   - Kiểm tra kết nối MQTT broker
-   - Xem data publish lên MQTT topics
+   - Kiểm tra kết nối server
+   - Xem data gửi đi
 ```
 
 ### **BƯỚC 3: Chạy Node.js Server**
@@ -413,22 +413,25 @@ npm run dev
 **Output mong đợi:**
 ```
 ==============================================
-IoT Smart Home Server Started (MQTT + HTTP)
+IoT Dashboard Server Started
 ==============================================
 HTTP Server: http://localhost:3000
 WebSocket Server: ws://localhost:3001
-MQTT Broker: mqtt://localhost:1883
 ==============================================
-Waiting for connections...
+Waiting for ESP8266 connection...
 
-MQTT Broker listening on port 1883
-Connected to MQTT broker
-Subscribed to sensor topics
-Subscribed to status topics
-
-WebSocket client connected
-MQTT received [/iot/smarthome/sensors/temperature]: {"temperature":28.5,"humidity":65.2,"timestamp":1640995200000}
-MQTT received [/iot/smarthome/sensors/motion]: {"motion":false,"timestamp":1640995200000}
+[ESP8266 connected from: 192.168.1.xxx]
+Received data from ESP8266: {
+  pir: false,
+  led1: false,
+  led2: false,
+  temperature: 28.5,
+  humidity: 65.2,
+  door: false,
+  autoOpen: false,
+  rfid: false,
+  distance: 125.4
+}
 ```
 
 ### **BƯỚC 4: Chạy Flutter App**
@@ -465,9 +468,8 @@ flutter build apk --release
 ```dart
 // File: lib/services/iot_service.dart
 IoTService({
-  this.baseUrl = 'http://192.168.1.100:3000',  // Đổi IP cho HTTP API
-  this.mqttUrl = '192.168.1.100', // Đổi IP cho MQTT broker
-  this.mqttPort = 1883,
+  this.baseUrl = 'http://192.168.1.100:3000',  // Đổi IP
+  this.wsUrl = 'ws://192.168.1.100:3001',
 });
 ```
 
@@ -475,60 +477,7 @@ IoTService({
 
 ## 📡 GIAO THỨC TRUYỀN THÔNG
 
-### **1. MQTT Protocol**
-
-**ESP8266 → Node.js Server (Sensor Data):**
-```json
-// Topic: /iot/smarthome/sensors/temperature
-{
-  "temperature": 28.5,
-  "humidity": 65.2,
-  "timestamp": 1640995200000
-}
-
-// Topic: /iot/smarthome/sensors/motion
-{
-  "motion": true,
-  "timestamp": 1640995200000
-}
-
-// Topic: /iot/smarthome/sensors/door
-{
-  "door": false,
-  "autoOpen": true,
-  "rfid": false,
-  "timestamp": 1640995200000
-}
-
-// Topic: /iot/smarthome/sensors/distance
-{
-  "distance": 8.3,
-  "timestamp": 1640995200000
-}
-```
-
-**Node.js Server → ESP8266 (Commands):**
-```json
-// Topic: /iot/smarthome/commands/led2
-{
-  "action": "on",
-  "timestamp": 1640995200000
-}
-
-// Topic: /iot/smarthome/commands/door
-{
-  "action": "open",
-  "timestamp": 1640995200000
-}
-```
-
-**MQTT Broker Configuration:**
-- **Port**: 1883 (default MQTT port)
-- **QoS**: 1 (at least once delivery)
-- **Retained Messages**: Enabled for sensor data
-- **Clean Session**: false (persistent connection)
-
-### **2. I2C Protocol**
+### **1. I2C Protocol**
 
 **Request từ ESP8266 → Arduino Uno 1 (Address 0x08):**
 ```
@@ -1338,30 +1287,6 @@ SOFTWARE.
 
 ## 📝 CHANGELOG
 
-### Version 4.0.0 (2025-11-18)
-**Added:**
-- 🚀 **MQTT Protocol Implementation**: Thay thế HTTP polling bằng MQTT publish/subscribe
-- 🔌 **Embedded MQTT Broker**: Aedes MQTT broker tích hợp trong Node.js server
-- 📡 **Real-time MQTT Communication**: ESP8266 publish sensor data, subscribe commands
-- 📱 **Flutter MQTT Client**: Mobile app sử dụng MQTT thay vì WebSocket
-- 🏗️ **Topic-based Architecture**: Structured MQTT topics cho sensors và commands
-- ⚡ **Event-driven Updates**: Real-time updates chỉ khi có thay đổi
-- 🔄 **QoS Support**: MQTT Quality of Service levels
-- 📊 **Retained Messages**: Sensor data được retain trên broker
-
-**Changed:**
-- 🔄 **Communication Protocol**: MQTT thay thế HTTP/WebSocket cho ESP8266
-- 🔄 **Data Flow**: Event-driven thay vì polling-based
-- 🔄 **Flutter Connection**: MQTT client thay thế WebSocket
-- 🔄 **Server Architecture**: MQTT broker + client trong Node.js
-
-**Technical Improvements:**
-- ⚡ **Reduced Bandwidth**: Chỉ publish khi có thay đổi
-- 🔋 **Better Power Efficiency**: ESP8266 không cần polling liên tục
-- 🛠️ **Improved Reliability**: MQTT QoS và retained messages
-- 📈 **Scalability**: Dễ dàng thêm nhiều devices
-- 🔧 **Simplified Architecture**: Ít dependencies hơn
-
 ### Version 3.0.0 (2025-11-17)
 **Added:**
 - ✨ Flutter cross-platform mobile app (Android, iOS, Windows)
@@ -1461,8 +1386,8 @@ Hệ thống IoT Smart Home này minh họa việc tích hợp đa nền tảng:
 
 ---
 
-*Last updated: November 18, 2025*
-*Version: 4.0.0*
+*Last updated: November 17, 2025*
+*Version: 3.0.0*
 
 ---
 
@@ -1531,9 +1456,8 @@ GND ---------------------- GND ---------------------- GND
 
 #### **Cho ESP8266:**
 - `ESP8266WiFi` (built-in với ESP8266 board)
-- `PubSubClient` by Nick O'Leary (MQTT client)
+- `ESP8266HTTPClient` (built-in)
 - `ArduinoJson` by Benoit Blanchon (v6.x)
-- `PubSubClient` by Nick O'Leary (MQTT client)
 - `Wire` (built-in)
 
 ### **Cài đặt Board ESP8266**
@@ -1757,31 +1681,25 @@ npm run dev
 │   Dashboard     │  ← Browser (http://localhost:3000)
 │   (HTML/CSS/JS) │
 └────────┬────────┘
-          │ WebSocket (port 3001)
-          │ HTTP REST API (port 3000)
-          ▼
+         │ WebSocket (port 3001)
+         │ HTTP REST API (port 3000)
+         ▼
 ┌─────────────────┐
-│  Node.js Server │  ← PC (Express + WebSocket + MQTT)
+│  Node.js Server │  ← PC (Express + WebSocket)
 │   (server.js)   │
-│                 │
-│ MQTT Broker     │  ← Aedes MQTT Broker (port 1883)
-│ (Aedes)         │
 └────────┬────────┘
-          │ MQTT Publish/Subscribe
-          │ WiFi Network (2.4GHz)
-          ▼
+         │ HTTP POST/GET
+         │ WiFi Network (2.4GHz)
+         ▼
 ┌─────────────────┐
-│    ESP8266      │  ← Master I2C + MQTT Client
+│    ESP8266      │  ← Master I2C
 │   (WiFi STA)    │
-│                 │
-│ MQTT Publisher  │  ← Publish sensor data
-│ MQTT Subscriber │  ← Subscribe to commands
 └────────┬────────┘
-          │ I2C Bus (SDA/SCL)
-          │
-     ─────┴─────
-     │         │
-     ▼         ▼
+         │ I2C Bus (SDA/SCL)
+         │
+    ─────┴─────
+    │         │
+    ▼         ▼
 ┌────────┐ ┌────────┐
 │Arduino │ │Arduino │
 │ Uno 1  │ │ Uno 2  │
