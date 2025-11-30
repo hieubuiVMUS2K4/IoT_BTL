@@ -49,7 +49,8 @@ const mqttClient = mqtt.connect(mqttBroker, {
   clean: true,
   reconnectPeriod: 1000,
   username: config.MQTT_USERNAME,
-  password: config.MQTT_PASSWORD
+  password: config.MQTT_PASSWORD,
+  rejectUnauthorized: false // Bỏ qua TLS certificate verification cho HiveMQ Cloud
 });
 
 // MQTT Topics

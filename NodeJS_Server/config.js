@@ -13,14 +13,13 @@ module.exports = {
   MQTT_USERNAME: process.env.MQTT_USERNAME || '',
   MQTT_PASSWORD: process.env.MQTT_PASSWORD || '',
   
-  // Build full MQTT URL
+  // Build full MQTT URL (without credentials to avoid special character issues)
   getMqttUrl() {
     const protocol = this.MQTT_PORT == 8883 ? 'mqtts://' : 'mqtt://';
     const host = this.MQTT_BROKER.replace(/^mqtt(s)?:\/\//, '');
     
-    if (this.MQTT_USERNAME && this.MQTT_PASSWORD) {
-      return `${protocol}${this.MQTT_USERNAME}:${this.MQTT_PASSWORD}@${host}:${this.MQTT_PORT}`;
-    }
+    // Don't embed credentials in URL - pass them via options instead
+    // This avoids issues with special characters like @ in password
     return `${protocol}${host}:${this.MQTT_PORT}`;
   }
 };
