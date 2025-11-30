@@ -1,5 +1,5 @@
 /*
- * Arduino Uno 1 - Slave I2C (Address: 8)
+ * Arduino Uno 1 - Slave UART (SoftwareSerial)
  * Nhiệm vụ: Điều khiển PIR, DHT, 2 LED, 1 Button
  * 
  * Kết nối phần cứng:
@@ -8,19 +8,23 @@
  * - LED 1 (điều khiển bởi PIR): chân 11
  * - LED 2 (điều khiển bởi Button): chân 10
  * - Button 1: chân 12 (INPUT_PULLUP)
- * - I2C: A4 (SDA), A5 (SCL)
+ * - UART Software: Pin 4 (RX), Pin 5 (TX) <--> ESP8266 D2 (TX), D1 (RX)
  */
 
-#include <Wire.h>
+#include <SoftwareSerial.h>
 #include <DHT.h>
 
 // ===== CẤU HÌNH CHÂN =====
-#define SLAVE_ADDRESS 8
+#define RX_PIN 4
+#define TX_PIN 5
 #define PIR_PIN 2
 #define DHT_PIN 3
 #define LED_PIR_PIN 11
 #define LED_BUTTON_PIN 10
 #define BUTTON_PIN 12
+
+// ===== CẤU HÌNH UART =====
+SoftwareSerial mySerial(RX_PIN, TX_PIN);
 
 // ===== CẤU HÌNH QUẠT L298N =====
 #define FAN_ENA_PIN 6    // PWM cho tốc độ quạt
@@ -42,7 +46,7 @@ float humidity = 0.0;
 bool fanState = false;           // Trạng thái quạt (bật/tắt)
 bool fanAutoMode = true;         // Chế độ tự động theo nhiệt độ
 int fanSpeed = 255;              // Tốc độ quạt (0-255)
-const float TEMP_THRESHOLD = 30.0;  // Ngưỡng nhiệt độ 30°C
+const float TEMP_THRESHOLD = 30;  // Ngưỡng nhiệt độ 30°C
 unsigned long fanManualTimeout = 0;
 const unsigned long fanManualDuration = 60000;  // 60s manual mode
 
@@ -64,32 +68,37 @@ bool manualLED2Mode = false;  // Chế độ điều khiển LED 2 thủ công
 unsigned long manualLED2Timeout = 0;  // Thời gian hết hiệu lực điều khiển thủ công LED 2
 const unsigned long manualTimeout = 30000;  // 30 giây timeout cho lệnh thủ công
 
-// ===== BUFFER DỮ LIỆU I2C =====
-byte i2cBuffer[10];
+// ===== BUFFER DỮ LIỆU =====
+byte dataBuffer[10];
 byte commandBuffer = 0;
-volatile unsigned long requestCount = 0;  // Đếm số lần requestEvent được gọi
 
-// ===== PROTOCOL I2C =====
+// ===== CHẾ ĐỘ AN NINH =====
+bool securityModeActive = false;
+unsigned long lastSecurityBlinkTime = 0;
+bool securityLEDState = false;
+const unsigned long securityBlinkInterval = 300;  // Nhấp nháy 300ms
+
+// ===== PROTOCOL =====
 // Command từ Master:
+// 'R': Request data
+// 'C': Command prefix -> Next byte is command code
 // 0x01: Bật LED 2
 // 0x02: Tắt LED 2
 // 0x03: Toggle LED 2
-// 0x07: Bật quạt (manual) - FIXED từ 0x04 tránh xung đột LED1
-// 0x08: Tắt quạt (manual) - FIXED từ 0x05
-// 0x09: Toggle quạt - FIXED từ 0x06
-// (LED 1 KHÔNG có lệnh điều khiển - chỉ tự động bởi PIR)
+// 0x07: Bật quạt (manual)
+// 0x08: Tắt quạt (manual)
+// 0x09: Toggle quạt
+// 0x20: Bật Security Mode
+// 0x21: Tắt Security Mode
 
 void setup() {
   // Khởi tạo Serial (debug)
   Serial.begin(9600);
-  Serial.println("Arduino Uno 1 - Slave I2C Started");
+  Serial.println("Arduino Uno 1 - Slave UART Started");
   
-  // KHỞI TẠO I2C TRƯỚC TIÊN (quan trọng!)
-  Wire.begin(SLAVE_ADDRESS);
-  Wire.onRequest(requestEvent);   // Khi Master yêu cầu dữ liệu
-  Wire.onReceive(receiveEvent);   // Khi Master gửi lệnh
-  Serial.println("I2C Slave initialized at address: " + String(SLAVE_ADDRESS));
-  delay(100);  // Delay để I2C ổn định
+  // KHỞI TẠO UART SOFTWARE
+  mySerial.begin(9600);
+  Serial.println("SoftwareSerial initialized on pins 4(RX), 5(TX)");
   
   // Khởi tạo chân
   pinMode(PIR_PIN, INPUT);
@@ -116,32 +125,16 @@ void setup() {
   delay(50);
   
   Serial.println("=== All systems ready ===");
-  Serial.println("Waiting for I2C requests from ESP8266...");
 }
 
 void loop() {
-  // ===== DEBUG: Hiển thị số lần I2C request =====
-  static unsigned long lastRequestCount = 0;
-  static unsigned long lastDebug = 0;
-  
-  if (millis() - lastDebug > 3000) {  // Mỗi 3 giây
-    if (requestCount > lastRequestCount) {
-      Serial.print("✓ I2C requests received: ");
-      Serial.println(requestCount);
-      lastRequestCount = requestCount;
-    } else {
-      Serial.println("✗ WARNING: No I2C requests from ESP8266!");
-    }
-    lastDebug = millis();
-  }
+  // ===== XỬ LÝ UART =====
+  handleUART();
   
   // ===== 1. XỬ LÝ BUTTON VẬT LÝ TRÊN BOARD =====
-  // Button 1 (chân 12) - Bật/tắt LED 2 (toggle)
   handleButton();
   
   // ===== 2. XỬ LÝ CẢM BIẾN PIR (TỰ ĐỘNG BẬT LED 1) =====
-  // Khi phát hiện chuyển động → LED 1 tự động BẬT
-  // Không có chuyển động > 7s → LED 1 tự động TẮT
   handlePIR();
   
   // ===== 3. ĐỌC CẢM BIẾN NHIỆT ẨM DHT =====
@@ -150,10 +143,57 @@ void loop() {
   // ===== 4. XỨ LÝ QUẠT TỰ ĐỘNG THEO NHIỆT ĐỘ =====
   handleFan();
   
-  // ===== 5. XỨ LÝ LỆNH TỪ ESP8266 (ĐIỀU KHIỂN TỪ XA) =====
+  // ===== 5. XỬ LÝ CHẾ ĐỘ AN NINH =====
+  handleSecurityMode();
+  
+  // ===== 6. XỬ LÝ LỆNH TỪ ESP8266 (ĐIỀU KHIỂN TỪ XA) =====
   processCommand();
   
-  delay(100);  // Delay nhỏ để tránh quá tải
+  delay(10);  // Delay nhỏ
+}
+
+// ===== XỬ LÝ UART =====
+void handleUART() {
+  if (mySerial.available()) {
+    char c = mySerial.read();
+    
+    if (c == 'R') {
+      // Master yêu cầu dữ liệu
+      sendData();
+    } else if (c == 'C') {
+      // Master gửi lệnh, đợi byte tiếp theo
+      unsigned long timeout = millis();
+      while (!mySerial.available() && (millis() - timeout < 100));
+      
+      if (mySerial.available()) {
+        commandBuffer = mySerial.read();
+        Serial.print("Received command: 0x");
+        Serial.println(commandBuffer, HEX);
+      }
+    }
+  }
+}
+
+// ===== GỬI DỮ LIỆU =====
+void sendData() {
+  dataBuffer[0] = pirState ? 1 : 0;
+  dataBuffer[1] = led1State ? 1 : 0;
+  dataBuffer[2] = led2State ? 1 : 0;
+  
+  int16_t tempInt = (int16_t)(temperature * 10);
+  int16_t humInt = (int16_t)(humidity * 10);
+  
+  dataBuffer[3] = (tempInt >> 8) & 0xFF;
+  dataBuffer[4] = tempInt & 0xFF;
+  dataBuffer[5] = (humInt >> 8) & 0xFF;
+  dataBuffer[6] = humInt & 0xFF;
+  
+  // Thêm trạng thái quạt
+  dataBuffer[7] = fanState ? 1 : 0;
+  dataBuffer[8] = fanAutoMode ? 1 : 0;
+  
+  mySerial.write(dataBuffer, 9);
+  Serial.println("Sent 9 bytes to Master");
 }
 
 // ===== XỬ LÝ BUTTON VẬT LÝ =====
@@ -161,7 +201,11 @@ void loop() {
 // Dùng INPUT_PULLUP nên:
 //   - Không nhấn: chân đọc HIGH (do pull-up kéo lên 5V)
 //   - Nhấn: chân đọc LOW (nối xuống GND)
+// QUAN TRỌNG: Không hoạt động khi Security Mode bật
 void handleButton() {
+  // Không cho phép button khi security mode
+  if (securityModeActive) return;
+  
   // ===== KIỂM TRA MANUAL MODE TIMEOUT LED 2 =====
   if (manualLED2Mode && (millis() - manualLED2Timeout > manualTimeout)) {
     manualLED2Mode = false;
@@ -170,18 +214,9 @@ void handleButton() {
   
   int reading = digitalRead(BUTTON_PIN);
   
-  // DEBUG: In trạng thái button mỗi khi thay đổi
-  static int lastReading = HIGH;
-  if (reading != lastReading) {
-    Serial.print("🔍 Button raw state: ");
-    Serial.println(reading == LOW ? "PRESSED (LOW)" : "RELEASED (HIGH)");
-    lastReading = reading;
-  }
-  
   // Debounce: Chống nhiễu khi nhấn nút
   if (reading != lastButtonState) {
     lastDebounceTime = millis();
-    Serial.println("⏱ Debounce timer reset");
   }
   
   // Chờ đủ thời gian debounce (200ms)
@@ -189,16 +224,11 @@ void handleButton() {
     // Nếu trạng thái đã ổn định và thay đổi
     if (reading != currentButtonState) {
       currentButtonState = reading;
-      Serial.print("✓ Button state confirmed: ");
-      Serial.println(currentButtonState == LOW ? "PRESSED" : "RELEASED");
       
       // Phát hiện cạnh xuống (nhấn button): HIGH → LOW
-      // LOW vì dùng INPUT_PULLUP (nhấn = nối GND = LOW)
       if (currentButtonState == LOW) {
         // Chống spam: Chỉ cho phép nhấn sau 500ms từ lần trước
         if (millis() - lastButtonPressTime < 500) {
-          Serial.println("⚠ Button press ignored (too fast)");
-          lastButtonState = reading;
           return;
         }
         lastButtonPressTime = millis();
@@ -211,11 +241,7 @@ void handleButton() {
         manualLED2Mode = true;
         manualLED2Timeout = millis();
         
-        Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        Serial.print("🔘 BUTTON PHYSICAL: LED 2 ");
-        Serial.println(led2State ? "ON ✓" : "OFF ✗");
-        Serial.println("   → Manual mode 30s");
-        Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        Serial.println("🔘 BUTTON PHYSICAL: LED 2 TOGGLE");
       }
     }
   }
@@ -227,6 +253,7 @@ void handleButton() {
 // PIR phát hiện chuyển động → TỰ ĐỘNG BẬT LED 1
 // Không có chuyển động > 7 giây → TỰ ĐỘNG TẮT LED 1
 // LED 1 HOÀN TOÀN tự động, KHÔNG CÓ manual mode
+// QUAN TRỌNG: Không điều khiển LED khi Security Mode bật (để nhấp nháy)
 void handlePIR() {
   static bool lastPirValue = LOW;
   static unsigned long pirDebounceTime = 0;
@@ -247,7 +274,10 @@ void handlePIR() {
       if (!pirState) {
         pirState = true;
         led1State = true;
-        digitalWrite(LED_PIR_PIN, HIGH);
+        // Chỉ bật LED nếu KHÔNG ở security mode
+        if (!securityModeActive) {
+          digitalWrite(LED_PIR_PIN, HIGH);
+        }
         Serial.println("👤 PIR AUTO: Motion detected → LED 1 ON");
       }
       // Reset timer mỗi khi còn chuyển động
@@ -259,7 +289,10 @@ void handlePIR() {
       if (pirState && (millis() - pirLastTriggerTime > pirTimeout)) {
         pirState = false;
         led1State = false;
-        digitalWrite(LED_PIR_PIN, LOW);
+        // Chỉ tắt LED nếu KHÔNG ở security mode
+        if (!securityModeActive) {
+          digitalWrite(LED_PIR_PIN, LOW);
+        }
         Serial.println("💤 PIR AUTO: No motion for 7s → LED 1 OFF");
       }
     }
@@ -307,18 +340,6 @@ void turnOnFan() {
   
   // Use direct 255 value (full speed)
   analogWrite(FAN_ENA_PIN, 255);
-  
-  // DEBUG: Kiểm tra trạng thái các chân
-  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  Serial.println("🔧 FAN ON DEBUG:");
-  Serial.println("   ENA (D6) PWM: 255 (FULL SPEED)");
-  Serial.print("   IN1 (D7): ");
-  Serial.println(digitalRead(FAN_IN1_PIN) ? "HIGH" : "LOW");
-  Serial.print("   IN2 (D8): ");
-  Serial.println(digitalRead(FAN_IN2_PIN) ? "HIGH" : "LOW");
-  Serial.println("   ⚠️ CHECK: L298N ENA jumper REMOVED?");
-  Serial.println("   ⚠️ CHECK: 12V power to L298N?");
-  Serial.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 }
 
 // ===== TẮT QUẠT =====
@@ -328,8 +349,6 @@ void turnOffFan() {
   digitalWrite(FAN_IN1_PIN, LOW);
   digitalWrite(FAN_IN2_PIN, LOW);
   analogWrite(FAN_ENA_PIN, 0);  // Tắt PWM sau cùng
-  
-  Serial.println("⚫ FAN OFF - All pins set to LOW/0");
 }
 
 // ===== ĐỌC CẢM BIẾN DHT =====
@@ -358,7 +377,6 @@ void readDHT() {
         Serial.println("%");
       }
     } else {
-      Serial.println("⚠ DHT read error - using last valid value");
       // Giữ nguyên giá trị cũ, không cập nhật
     }
     
@@ -375,52 +393,76 @@ void processCommand() {
   
   switch (commandBuffer) {
     case 0x01:  // Bật LED 2
-      led2State = true;
-      digitalWrite(LED_BUTTON_PIN, HIGH);
-      manualLED2Mode = true;
-      manualLED2Timeout = millis();
-      Serial.println("🌐 WEB: LED 2 ON (manual mode 30s)");
+      if (!securityModeActive) {  // Không cho phép điều khiển khi security mode
+        led2State = true;
+        digitalWrite(LED_BUTTON_PIN, HIGH);
+        manualLED2Mode = true;
+        manualLED2Timeout = millis();
+        Serial.println("🌐 WEB: LED 2 ON (manual mode 30s)");
+      } else {
+        Serial.println("⚠️ Cannot control LED2: Security mode active");
+      }
       break;
       
     case 0x02:  // Tắt LED 2
-      led2State = false;
-      digitalWrite(LED_BUTTON_PIN, LOW);
-      manualLED2Mode = true;
-      manualLED2Timeout = millis();
-      Serial.println("🌐 WEB: LED 2 OFF (manual mode 30s)");
+      if (!securityModeActive) {
+        led2State = false;
+        digitalWrite(LED_BUTTON_PIN, LOW);
+        manualLED2Mode = true;
+        manualLED2Timeout = millis();
+        Serial.println("🌐 WEB: LED 2 OFF (manual mode 30s)");
+      } else {
+        Serial.println("⚠️ Cannot control LED2: Security mode active");
+      }
       break;
       
     case 0x03:  // Toggle LED 2
-      led2State = !led2State;
-      digitalWrite(LED_BUTTON_PIN, led2State ? HIGH : LOW);
-      manualLED2Mode = true;
-      manualLED2Timeout = millis();
-      Serial.println("🌐 WEB: LED 2 TOGGLE (manual mode 30s)");
+      if (!securityModeActive) {
+        led2State = !led2State;
+        digitalWrite(LED_BUTTON_PIN, led2State ? HIGH : LOW);
+        manualLED2Mode = true;
+        manualLED2Timeout = millis();
+        Serial.println("🌐 WEB: LED 2 TOGGLE (manual mode 30s)");
+      } else {
+        Serial.println("⚠️ Cannot control LED2: Security mode active");
+      }
       break;
     
-    case 0x07:  // Bật quạt (manual) - FIXED từ 0x04
+    case 0x07:  // Bật quạt (manual)
       fanAutoMode = false;
       fanManualTimeout = millis();
       turnOnFan();
       Serial.println("🌐 WEB: FAN ON (manual 60s)");
       break;
     
-    case 0x08:  // Tắt quạt (manual) - FIXED từ 0x05
+    case 0x08:  // Tắt quạt (manual)
       fanAutoMode = false;
       fanManualTimeout = millis();
       turnOffFan();
       Serial.println("🌐 WEB: FAN OFF (manual 60s)");
       break;
     
-    case 0x09:  // Toggle quạt - FIXED từ 0x06
+    case 0x09:  // Toggle quạt
       fanAutoMode = false;
       fanManualTimeout = millis();
       if (fanState) turnOffFan();
       else turnOnFan();
       Serial.println("🌐 WEB: FAN TOGGLE (manual 60s)");
       break;
-      
-   
+    
+    case 0x20:  // Bật Security Mode
+      securityModeActive = true;
+      Serial.println("🔒 SECURITY MODE: ON");
+      break;
+    
+    case 0x21:  // Tắt Security Mode
+      securityModeActive = false;
+      securityLEDState = false;
+      // Khôi phục trạng thái LED theo logic thực
+      digitalWrite(LED_PIR_PIN, led1State ? HIGH : LOW);
+      digitalWrite(LED_BUTTON_PIN, led2State ? HIGH : LOW);
+      Serial.println("🔓 SECURITY MODE: OFF");
+      break;
       
     default:
       Serial.print("⚠️ Unknown command: 0x");
@@ -431,44 +473,18 @@ void processCommand() {
   commandBuffer = 0;  // Clear command
 }
 
-// ===== I2C REQUEST EVENT =====
-// Master yêu cầu dữ liệu
-void requestEvent() {
-  requestCount++;  // Đếm số lần được gọi
+// ===== XỬ LÝ CHẾ ĐỘ AN NINH =====
+void handleSecurityMode() {
+  if (!securityModeActive) return;
   
-  // KHÔNG DÙNG Serial.println trong interrupt!
-  
-  i2cBuffer[0] = pirState ? 1 : 0;
-  i2cBuffer[1] = led1State ? 1 : 0;
-  i2cBuffer[2] = led2State ? 1 : 0;
-  
-  int16_t tempInt = (int16_t)(temperature * 10);
-  int16_t humInt = (int16_t)(humidity * 10);
-  
-  i2cBuffer[3] = (tempInt >> 8) & 0xFF;
-  i2cBuffer[4] = tempInt & 0xFF;
-  i2cBuffer[5] = (humInt >> 8) & 0xFF;
-  i2cBuffer[6] = humInt & 0xFF;
-  
-  // Thêm trạng thái quạt
-  i2cBuffer[7] = fanState ? 1 : 0;
-  i2cBuffer[8] = fanAutoMode ? 1 : 0;
-  
-  Wire.write(i2cBuffer, 9);  // Gửi 9 bytes (thêm 2 bytes quạt)
-}
-
-// ===== I2C RECEIVE EVENT =====
-// Master gửi lệnh
-void receiveEvent(int byteCount) {
-  if (byteCount > 0) {
-    commandBuffer = Wire.read();
+  // Nhấp nháy LED khi security mode bật
+  if (millis() - lastSecurityBlinkTime >= securityBlinkInterval) {
+    securityLEDState = !securityLEDState;
     
-    // Đọc hết dữ liệu còn lại (nếu có)
-    while (Wire.available()) {
-      Wire.read();
-    }
+    // Nhấp nháy cả 2 LED
+    digitalWrite(LED_PIR_PIN, securityLEDState ? HIGH : LOW);
+    digitalWrite(LED_BUTTON_PIN, securityLEDState ? HIGH : LOW);
     
-    Serial.print("Received command: 0x");
-    Serial.println(commandBuffer, HEX);
+    lastSecurityBlinkTime = millis();
   }
 }

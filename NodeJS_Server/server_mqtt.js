@@ -12,10 +12,11 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const WebSocket = require('ws');
 const mqtt = require('mqtt');
+const config = require('./config');
 
 const app = express();
-const PORT = 3000;
-const WS_PORT = 3001;
+const PORT = config.PORT;
+const WS_PORT = config.WS_PORT;
 
 // ===== MIDDLEWARE =====
 app.use(cors());
@@ -35,16 +36,20 @@ let systemData = {
   autoOpen: false,
   rfid: false,
   distance: 0,
+  securityMode: false,
+  intruder: false,
   timestamp: Date.now(),
   online: false
 };
 
 // ===== MQTT CLIENT =====
-const mqttBroker = 'mqtt://10.137.147.176:1883';  // Kết nối đến Mosquitto trên mạng
+const mqttBroker = config.getMqttUrl();
 const mqttClient = mqtt.connect(mqttBroker, {
   clientId: 'NodeJS_Server_' + Math.random().toString(16).substring(2, 8),
   clean: true,
-  reconnectPeriod: 1000
+  reconnectPeriod: 1000,
+  username: config.MQTT_USERNAME,
+  password: config.MQTT_PASSWORD
 });
 
 // MQTT Topics
@@ -52,6 +57,7 @@ const TOPIC_DATA = 'iot/sensors/data';
 const TOPIC_CONTROL_LED2 = 'iot/control/led2';
 const TOPIC_CONTROL_FAN = 'iot/control/fan';
 const TOPIC_CONTROL_DOOR = 'iot/control/door';
+const TOPIC_CONTROL_SECURITY = 'iot/control/security';
 
 mqttClient.on('connect', () => {
   console.log('✓ Connected to MQTT Broker');
@@ -166,6 +172,9 @@ app.post('/api/control', (req, res) => {
       break;
     case 'door':
       topic = TOPIC_CONTROL_DOOR;
+      break;
+    case 'security':
+      topic = TOPIC_CONTROL_SECURITY;
       break;
     default:
       return res.status(400).json({ 

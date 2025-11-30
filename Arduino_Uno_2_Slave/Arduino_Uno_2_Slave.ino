@@ -1,5 +1,5 @@
 /*
- * Arduino Uno 2 - Slave I2C (Address: 9)
+ * Arduino Uno 2 - Slave UART (SoftwareSerial)
  * Nhiệm vụ: Điều khiển RFID, HC-SR04, Servo, 2 Button
  * 
  * Kết nối phần cứng:
@@ -15,16 +15,17 @@
  * - HC-SR04:
  *   + Trig: 4
  *   + Echo: 5
- * - I2C: A4 (SDA), A5 (SCL)
+ * - UART Software: Pin 2 (RX), Pin 3 (TX) <--> ESP8266 D6 (TX), D5 (RX)
  */
 
-#include <Wire.h>
+#include <SoftwareSerial.h>
 #include <SPI.h>
 #include <MFRC522.h>
 #include <Servo.h>
 
 // ===== CẤU HÌNH CHÂN =====
-#define SLAVE_ADDRESS 9
+#define RX_PIN 2
+#define TX_PIN 3
 #define BUTTON_OPEN_PIN A0
 #define BUTTON_CLOSE_PIN A1
 #define SERVO_PIN 6  // Đổi sang D6 (PWM)
@@ -32,6 +33,9 @@
 #define SS_PIN 10
 #define TRIG_PIN 4
 #define ECHO_PIN 5
+
+// ===== CẤU HÌNH UART =====
+SoftwareSerial mySerial(RX_PIN, TX_PIN);
 
 // ===== CẤU HÌNH SERVO =====
 Servo doorServo;
@@ -73,6 +77,7 @@ unsigned long lastButtonClosePressTime = 0;  // Chống spam
 bool manualDoorMode = false;  // Chế độ điều khiển cửa thủ công
 unsigned long manualDoorTimeout = 0;  // Thời gian hết hiệu lực điều khiển thủ công
 const unsigned long manualTimeout = 30000;  // 30 giây timeout
+bool securityModeActive = false;  // Chế độ an ninh (khi bật thì không mở cửa tự động)
 
 // ===== BIẾN TỰ ĐỘNG ĐÓNG CỬA =====
 bool autoCloseScheduled = false;  // Đã lên lịch tự động đóng cửa
@@ -81,25 +86,25 @@ const unsigned long autoCloseDelay = 5000;  // 5 giây - THỐNG NHẤT CHO TẤ
 enum DoorSource { NONE, AUTO_SENSOR, MANUAL_BUTTON, WEB_COMMAND };
 DoorSource lastDoorSource = NONE;  // Nguồn gốc mở cửa gần nhất
 
-// ===== BUFFER DỮ LIỆU I2C =====
-byte i2cBuffer[5];  // Chỉ cần 5 bytes
+// ===== BUFFER DỮ LIỆU =====
+byte dataBuffer[5];
 byte commandBuffer = 0;
-volatile unsigned long requestCount = 0;  // Đếm số lần requestEvent được gọi
 
-// ===== PROTOCOL I2C =====
+// ===== PROTOCOL =====
 // Command từ Master:
+// 'R': Request data
+// 'C': Command prefix -> Next byte is command code
 // 0x10: Mở cửa
 // 0x11: Đóng cửa
 // 0x12: Toggle cửa
 
 void setup() {
   Serial.begin(9600);
-  Serial.println(F("Uno2 Start"));
+  Serial.println(F("Uno2 Start UART"));
   
-  Wire.begin(SLAVE_ADDRESS);
-  Wire.onRequest(requestEvent);
-  Wire.onReceive(receiveEvent);
-  delay(100);
+  // KHỞI TẠO UART SOFTWARE
+  mySerial.begin(9600);
+  Serial.println("SoftwareSerial initialized on pins 2(RX), 3(TX)");
   
   // Khởi tạo chân
   pinMode(BUTTON_OPEN_PIN, INPUT_PULLUP);
@@ -109,12 +114,16 @@ void setup() {
   
   // Khởi tạo Servo
   doorServo.attach(SERVO_PIN);
-  doorServo.write(DOOR_CLOSED_ANGLE);  // Đóng cửa ban đầu
-  currentServoAngle = DOOR_CLOSED_ANGLE;
-  targetServoAngle = DOOR_CLOSED_ANGLE;
-  doorOpen = false;
-  delay(500);  // Chờ servo về vị trí
+  Serial.println("Servo attached. Testing movement...");
+  
+  // Test Servo (Wave) để báo hiệu khởi động thành công
+  doorServo.write(45);
+  delay(500);
+  doorServo.write(DOOR_CLOSED_ANGLE);
+  delay(500);
+  
   doorServo.detach();  // Detach để tránh jitter
+  Serial.println("Servo test done.");
   
   SPI.begin();
   mfrc522.PCD_Init();
@@ -123,12 +132,8 @@ void setup() {
 }
 
 void loop() {
-  static unsigned long lastDebug = 0;
-  if (millis() - lastDebug > 5000) {
-    Serial.print(F("I2C:"));
-    Serial.println(requestCount);
-    lastDebug = millis();
-  }
+  // ===== XỬ LÝ UART =====
+  handleUART();
   
   // ===== 1. XỬ LÝ BUTTON VẬT LÝ TRÊN BOARD =====
   // Button 2 (A0) - Mở cửa thủ công
@@ -155,6 +160,70 @@ void loop() {
   updateServo();
   
   delay(10);  // Giảm delay để servo mượt hơn
+}
+
+// ===== XỬ LÝ UART =====
+void handleUART() {
+  if (mySerial.available()) {
+    char c = mySerial.read();
+    Serial.print("UART RX: "); Serial.println(c); // Debug - BẬT ĐỂ KIỂM TRA
+    
+    if (c == 'R') {
+      // Master yêu cầu dữ liệu
+      sendData();
+    } else if (c == 'C') {
+      // Master gửi lệnh, đợi byte tiếp theo
+      unsigned long timeout = millis();
+      while (!mySerial.available() && (millis() - timeout < 100));
+      
+      if (mySerial.available()) {
+        commandBuffer = mySerial.read();
+        Serial.print("Received command: 0x");
+        Serial.println(commandBuffer, HEX);
+      }
+    }
+  }
+}
+
+// ===== GỬI DỮ LIỆU =====
+void sendData() {
+  dataBuffer[0] = doorOpen ? 1 : 0;
+  dataBuffer[1] = autoOpenTriggered ? 1 : 0;  // Gửi trạng thái auto-open
+  dataBuffer[2] = rfidAccessGranted ? 1 : 0;
+  
+  int16_t distInt = (int16_t)(distance * 10);
+  dataBuffer[3] = (distInt >> 8) & 0xFF;
+  dataBuffer[4] = distInt & 0xFF;
+  
+  mySerial.write(dataBuffer, 5);
+  Serial.println("Sent 5 bytes to Master");
+}
+
+// ===== ĐO KHOẢNG CÁCH HC-SR04 =====
+void measureDistance() {
+  static unsigned long lastMeasure = 0;
+  
+  // Đo mỗi 200ms
+  if (millis() - lastMeasure < 200) return;
+  
+  // Gửi xung trigger
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+  
+  // Đọc xung echo - GIẢM TIMEOUT XUỐNG 10ms (tầm 1.7m) để tránh block lâu
+  long duration = pulseIn(ECHO_PIN, HIGH, 10000); 
+  
+  // Tính khoảng cách (cm)
+  if (duration > 0) {
+    distance = duration * 0.034 / 2.0;
+  } else {
+    distance = 999.9;  // Không đo được
+  }
+  
+  lastMeasure = millis();
 }
 
 // ===== XỬ LÝ BUTTON VẬT LÝ =====
@@ -268,40 +337,18 @@ bool checkValidCard(byte *cardUID, byte cardSize) {
   return true;
 }
 
-// ===== ĐO KHOẢNG CÁCH HC-SR04 =====
-void measureDistance() {
-  static unsigned long lastMeasure = 0;
-  
-  // Đo mỗi 200ms
-  if (millis() - lastMeasure < 200) return;
-  
-  // Gửi xung trigger
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
-  
-  // Đọc xung echo
-  long duration = pulseIn(ECHO_PIN, HIGH, 30000);  // Timeout 30ms
-  
-  // Tính khoảng cách (cm)
-  if (duration > 0) {
-    distance = duration * 0.034 / 2.0;
-  } else {
-    distance = 999.9;  // Không đo được
-  }
-  
-  lastMeasure = millis();
-}
-
-
 // ===== TỰ ĐỘNG MỞ CỬA KHI PHÁT HIỆN NGƯỜI =====
 // Nếu khoảng cách < 10cm (người đến gần) → TỰ ĐỘNG MỞ CỬA
-// Chỉ hoạt động khi không ở chế độ manual
+// Chỉ hoạt động khi không ở chế độ manual hoặc security mode
 void autoOpenDoor() {
   // Nếu đang manual mode, bỏ qua tự động mở cửa
   if (manualDoorMode) {
+    autoOpenTriggered = false;
+    return;
+  }
+  
+  // Nếu security mode đang bật, KHÔNG mở cửa tự động
+  if (securityModeActive) {
     autoOpenTriggered = false;
     return;
   }
@@ -425,31 +472,40 @@ void processCommand() {
       manualDoorMode = true;
       manualDoorTimeout = millis();
       break;
+    case 0x20:  // Bật Security Mode
+      securityModeActive = true;
+      autoOpenTriggered = false;  // Reset auto-open
+      Serial.println(F("🛡️ Security Mode: ON"));
+      break;
+    case 0x21:  // Tắt Security Mode
+      securityModeActive = false;
+      Serial.println(F("🔓 Security Mode: OFF"));
+      break;
   }
   commandBuffer = 0;
 }
 
 // ===== I2C REQUEST EVENT =====
 // Master yêu cầu dữ liệu
-void requestEvent() {
-  requestCount++;
+// void requestEvent() {
+//   requestCount++;
   
-  i2cBuffer[0] = doorOpen ? 1 : 0;
-  i2cBuffer[1] = autoOpenTriggered ? 1 : 0;  // Gửi trạng thái auto-open
-  i2cBuffer[2] = rfidAccessGranted ? 1 : 0;
+//   i2cBuffer[0] = doorOpen ? 1 : 0;
+//   i2cBuffer[1] = autoOpenTriggered ? 1 : 0;  // Gửi trạng thái auto-open
+//   i2cBuffer[2] = rfidAccessGranted ? 1 : 0;
   
-  int16_t distInt = (int16_t)(distance * 10);
-  i2cBuffer[3] = (distInt >> 8) & 0xFF;
-  i2cBuffer[4] = distInt & 0xFF;
+//   int16_t distInt = (int16_t)(distance * 10);
+//   i2cBuffer[3] = (distInt >> 8) & 0xFF;
+//   i2cBuffer[4] = distInt & 0xFF;
   
-  Wire.write(i2cBuffer, 5);
-}
+//   Wire.write(i2cBuffer, 5);
+// }
 
 // ===== I2C RECEIVE EVENT =====
 // Master gửi lệnh
-void receiveEvent(int byteCount) {
-  if (byteCount > 0) {
-    commandBuffer = Wire.read();
-    while (Wire.available()) Wire.read();
-  }
-}
+// void receiveEvent(int byteCount) {
+//   if (byteCount > 0) {
+//     commandBuffer = Wire.read();
+//     while (Wire.available()) Wire.read();
+//   }
+// }

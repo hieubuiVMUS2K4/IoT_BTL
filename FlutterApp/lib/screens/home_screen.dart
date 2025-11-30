@@ -6,6 +6,7 @@ import '../providers/iot_provider.dart';
 import '../widgets/sensor_card.dart';
 import '../widgets/control_card.dart';
 import '../widgets/connection_status.dart';
+import '../widgets/security_card.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,6 +16,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  IoTProvider? _iotProvider;
+
   @override
   void initState() {
     super.initState();
@@ -25,18 +28,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initializeConnection() async {
-    final iotProvider = Provider.of<IoTProvider>(context, listen: false);
+    _iotProvider = Provider.of<IoTProvider>(context, listen: false);
     
     // Kết nối WebSocket
-    iotProvider.connectWebSocket();
+    _iotProvider!.connectWebSocket();
     
     // Fetch dữ liệu ban đầu
-    await iotProvider.fetchCurrentData();
+    await _iotProvider!.fetchCurrentData();
   }
 
   @override
   void dispose() {
-    Provider.of<IoTProvider>(context, listen: false).disconnect();
+    _iotProvider?.disconnect();
     super.dispose();
   }
 
@@ -199,6 +202,23 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ],
                     ).animate().fadeIn(delay: 200.ms),
+                    
+                    const SizedBox(height: 24),
+                    
+                    // Security Mode Section
+                    Text(
+                      'An ninh',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    
+                    SecurityCard(
+                      securityMode: iotProvider.data.securityMode,
+                      intruderDetected: iotProvider.data.intruder,
+                      onToggle: () => _toggleSecurityMode(iotProvider),
+                    ).animate().fadeIn(delay: 250.ms),
                     
                     const SizedBox(height: 24),
                     
@@ -506,6 +526,27 @@ class _HomeScreenState extends State<HomeScreen> {
       SnackBar(
         content: Text(success ? 'Đã gửi lệnh $action quạt' : 'Lỗi kết nối'),
         backgroundColor: success ? Colors.green : Colors.red,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _toggleSecurityMode(IoTProvider iotProvider) async {
+    final success = await iotProvider.toggleSecurityMode();
+    
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          success
+              ? iotProvider.data.securityMode
+                  ? '🛡️ Chế độ an ninh đã BẬT'
+                  : '🔓 Chế độ an ninh đã TẮT'
+              : 'Lỗi kết nối',
+        ),
+        backgroundColor: success ? Colors.orange : Colors.red,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
       ),

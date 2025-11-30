@@ -101,6 +101,25 @@ class IoTService {
     }
   }
 
+  // Điều khiển thiết bị chung (generic control)
+  Future<bool> controlDevice(String device, String action) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/control'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'device': device,
+          'action': action,
+        }),
+      ).timeout(const Duration(seconds: 5));
+
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Error controlling $device: $e');
+      return false;
+    }
+  }
+
   // Kiểm tra kết nối
   Future<bool> checkConnection() async {
     try {

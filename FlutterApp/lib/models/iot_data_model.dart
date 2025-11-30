@@ -15,6 +15,8 @@ class IoTData {
   final bool autoOpen;
   final bool rfidAccess;
   final double distance;
+  final bool securityMode;
+  final bool intruder;
   final DateTime timestamp;
   final bool online;
 
@@ -30,6 +32,8 @@ class IoTData {
     required this.autoOpen,
     required this.rfidAccess,
     required this.distance,
+    this.securityMode = false,
+    this.intruder = false,
     required this.timestamp,
     this.online = true,
   });
@@ -66,6 +70,8 @@ class IoTData {
       autoOpen: false,
       rfidAccess: false,
       distance: 0.0,
+      securityMode: false,
+      intruder: false,
       timestamp: DateTime.now(),
       online: false,
     );
@@ -83,6 +89,8 @@ class IoTData {
     bool? autoOpen,
     bool? rfidAccess,
     double? distance,
+    bool? securityMode,
+    bool? intruder,
     DateTime? timestamp,
     bool? online,
   }) {
@@ -98,6 +106,8 @@ class IoTData {
       autoOpen: autoOpen ?? this.autoOpen,
       rfidAccess: rfidAccess ?? this.rfidAccess,
       distance: distance ?? this.distance,
+      securityMode: securityMode ?? this.securityMode,
+      intruder: intruder ?? this.intruder,
       timestamp: timestamp ?? this.timestamp,
       online: online ?? this.online,
     );

@@ -1,9 +1,10 @@
 /*
- * ESP8266 - Master I2C + MQTT Client
- * Nhiệm vụ: Thu thập dữ liệu từ 2 Arduino, gửi về MQTT Broker
+ * ESP8266 - Master UART (SoftwareSerial) + MQTT Client
+ * Nhiệm vụ: Thu thập dữ liệu từ 2 Arduino qua UART, gửi về MQTT Broker
  * 
- * Kết nối phần cứng:
- * - I2C: D1 (GPIO5 - SCL), D2 (GPIO4 - SDA)
+ * Kết nối phần cứng (UART Software):
+ * - Arduino 1: D1 (RX) - D2 (TX)  <--> Uno 1: Pin 5 (TX) - Pin 4 (RX)
+ * - Arduino 2: D5 (RX) - D6 (TX)  <--> Uno 2: Pin 3 (TX) - Pin 2 (RX)
  * 
  * MQTT Topics:
  * - Publish: iot/sensors/data (JSON sensor data)
@@ -12,7 +13,7 @@
 
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
-#include <Wire.h>
+#include <SoftwareSerial.h>
 #include <ArduinoJson.h>
 
 // ===== CẤU HÌNH WIFI =====
@@ -20,7 +21,7 @@ const char* ssid = "tinhvdth";
 const char* password = "123456789tt";
 
 // ===== CẤU HÌNH MQTT =====
-const char* mqtt_server = "10.137.147.176";  // IP máy chạy Mosquitto (giữ nguyên nếu Mosquitto chạy trên máy khác)
+const char* mqtt_server = "10.137.147.176";  // IP máy chạy Mosquitto
 const int mqtt_port = 1883;
 const char* mqtt_client_id = "ESP8266_IoT_Master";
 
@@ -29,12 +30,18 @@ const char* topic_data = "iot/sensors/data";
 const char* topic_control_led2 = "iot/control/led2";
 const char* topic_control_fan = "iot/control/fan";
 const char* topic_control_door = "iot/control/door";
+const char* topic_control_security = "iot/control/security";
 
-// ===== CẤU HÌNH I2C =====
-#define SLAVE1_ADDRESS 8
-#define SLAVE2_ADDRESS 9
-#define SDA_PIN 4
-#define SCL_PIN 5
+// ===== CẤU HÌNH UART SOFTWARE =====
+// Slave 1 (Uno 1)
+#define S1_RX_PIN D1  // GPIO 5
+#define S1_TX_PIN D2  // GPIO 4
+SoftwareSerial swSer1(S1_RX_PIN, S1_TX_PIN);
+
+// Slave 2 (Uno 2)
+#define S2_RX_PIN D5  // GPIO 14
+#define S2_TX_PIN D6  // GPIO 12
+SoftwareSerial swSer2(S2_RX_PIN, S2_TX_PIN);
 
 // ===== DỮ LIỆU TỪ SLAVE 1 =====
 struct Slave1Data {
@@ -63,28 +70,20 @@ PubSubClient mqttClient(espClient);
 
 // ===== BIẾN ĐIỀU KHIỂN =====
 unsigned long lastUpdate = 0;
-const unsigned long updateInterval = 5000;  // Tăng từ 2s lên 5s để debug rõ hơn
+const unsigned long updateInterval = 2000;  // 2 giây cập nhật 1 lần
+
+// ===== CHẾ ĐỘ AN NINH =====
+bool securityModeActive = false;  // Chế độ an ninh
+bool intruderDetected = false;    // Phát hiện xâm nhập
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n\n=== ESP8266 MQTT IoT System ===");
+  Serial.println("\n\n=== ESP8266 MQTT IoT System (UART Version) ===");
   
-  // Khởi tạo I2C
-  pinMode(SDA_PIN, INPUT_PULLUP);
-  pinMode(SCL_PIN, INPUT_PULLUP);
-  delay(100);
-  
-  Wire.begin(SDA_PIN, SCL_PIN);
-  Wire.setClock(50000);
-  Wire.setClockStretchLimit(1500);
-  Serial.println("I2C Master initialized (50kHz)");
-  
-  // Đợi Arduino
-  Serial.println("Waiting for Arduino slaves...");
-  delay(5000);
-  
-  // Scan I2C
-  scanI2C();
+  // Khởi tạo SoftwareSerial
+  swSer1.begin(9600);
+  swSer2.begin(9600);
+  Serial.println("SoftwareSerial initialized (9600 baud)");
   
   // Kết nối WiFi
   connectWiFi();
@@ -119,8 +118,6 @@ void loop() {
     publishSensorData();
     lastUpdate = millis();
   }
-  
-  delay(100);
 }
 
 // ===== KẾT NỐI WIFI =====
@@ -159,6 +156,7 @@ void reconnectMQTT() {
       mqttClient.subscribe(topic_control_led2);
       mqttClient.subscribe(topic_control_fan);
       mqttClient.subscribe(topic_control_door);
+      mqttClient.subscribe(topic_control_security);
       
       Serial.println("✓ Subscribed to control topics");
     } else {
@@ -202,6 +200,25 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     else if (message == "close") sendCommandToSlave2(0x11);
     else if (message == "toggle") sendCommandToSlave2(0x12);
   }
+  
+  // Xử lý lệnh Security Mode
+  else if (strcmp(topic, topic_control_security) == 0) {
+    if (message == "on") {
+      securityModeActive = true;
+      intruderDetected = false;  // Reset cảnh báo
+      // GỬI LỆNH XUỐNG CẢ 2 ARDUINO
+      sendCommandToSlave1(0x20);  // Arduino Uno 1: Bật LED nhấp nháy
+      sendCommandToSlave2(0x20);  // Arduino Uno 2: Tắt auto-open cửa
+      Serial.println("🔒 SECURITY MODE: ON");
+    } else if (message == "off") {
+      securityModeActive = false;
+      intruderDetected = false;
+      // GỬI LỆNH XUỐNG CẢ 2 ARDUINO
+      sendCommandToSlave1(0x21);  // Arduino Uno 1: Tắt LED nhấp nháy
+      sendCommandToSlave2(0x21);  // Arduino Uno 2: Bật lại auto-open cửa
+      Serial.println("🔓 SECURITY MODE: OFF");
+    }
+  }
 }
 
 // ===== PUBLISH DỮ LIỆU =====
@@ -223,6 +240,39 @@ void publishSensorData() {
   doc["rfid"] = slave2Data.rfidAccess;
   doc["distance"] = slave2Data.distance;
   
+  // Security Mode
+  doc["securityMode"] = securityModeActive;
+  doc["intruder"] = intruderDetected;
+  
+  // Logic phát hiện xâm nhập
+  if (securityModeActive) {
+    bool currentThreat = false;
+    
+    // PIR phát hiện chuyển động
+    if (slave1Data.pirActive) {
+      currentThreat = true;
+      if (!intruderDetected) {
+        Serial.println("🚨 INTRUDER ALERT: Motion detected!");
+      }
+    }
+    
+    // Khoảng cách < 30cm
+    if (slave2Data.distance > 0 && slave2Data.distance < 30) {
+      currentThreat = true;
+      if (!intruderDetected) {
+        Serial.println("🚨 INTRUDER ALERT: Close distance!");
+      }
+    }
+    
+    // Cập nhật trạng thái
+    intruderDetected = currentThreat;
+    
+    // Tự động clear cảnh báo khi không còn mối đe dọa
+    if (!currentThreat && intruderDetected) {
+      Serial.println("✓ All clear - No threats detected");
+    }
+  }
+  
   doc["timestamp"] = millis();
   
   String jsonString;
@@ -237,118 +287,111 @@ void publishSensorData() {
 
 // ===== ĐỌC SLAVE 1 =====
 void readSlave1Data() {
-  Wire.requestFrom(SLAVE1_ADDRESS, 9);
-  delay(50);  // Tăng từ 5ms lên 50ms
+  swSer1.listen();  // Lắng nghe cổng 1
+  delay(50);        // Delay nhỏ để ổn định
+  swSer1.flush();   // Flush buffer
   
+  // Xóa buffer cũ
+  while (swSer1.available()) swSer1.read();
+  
+  // Gửi yêu cầu
+  swSer1.write('R');
+  
+  // Đợi phản hồi (timeout 100ms)
   unsigned long timeout = millis();
-  while (Wire.available() < 9 && (millis() - timeout < 500)) {
+  while (swSer1.available() < 9 && (millis() - timeout < 100)) {
     delay(1);
   }
   
-  int available = Wire.available();
-  Serial.print("[Slave1] Requested 9 bytes, received: ");
-  Serial.print(available);
-  Serial.println(" bytes");
+  int available = swSer1.available();
   
   if (available >= 9) {
-    slave1Data.pirActive = Wire.read() == 1;
-    slave1Data.led1State = Wire.read() == 1;
-    slave1Data.led2State = Wire.read() == 1;
+    slave1Data.pirActive = swSer1.read() == 1;
+    slave1Data.led1State = swSer1.read() == 1;
+    slave1Data.led2State = swSer1.read() == 1;
     
-    int16_t tempInt = (Wire.read() << 8) | Wire.read();
+    int16_t tempInt = (swSer1.read() << 8) | swSer1.read();
     slave1Data.temperature = tempInt / 10.0;
     
-    int16_t humInt = (Wire.read() << 8) | Wire.read();
+    int16_t humInt = (swSer1.read() << 8) | swSer1.read();
     slave1Data.humidity = humInt / 10.0;
     
-    slave1Data.fanState = Wire.read() == 1;
-    slave1Data.fanAutoMode = Wire.read() == 1;
+    slave1Data.fanState = swSer1.read() == 1;
+    slave1Data.fanAutoMode = swSer1.read() == 1;
     
     Serial.println("✓ Slave1 data read OK");
-  } else if (available == 0) {
-    Serial.println("✗ Slave1 NO RESPONSE - Check wiring!");
   } else {
-    Serial.print("✗ Slave1 INCOMPLETE - Got ");
-    Serial.print(available);
-    Serial.println("/9 bytes");
+    Serial.print("✗ Slave1 Timeout/Incomplete: ");
+    Serial.println(available);
   }
-  
-  while (Wire.available()) Wire.read();
 }
 
 // ===== ĐỌC SLAVE 2 =====
 void readSlave2Data() {
-  Wire.requestFrom(SLAVE2_ADDRESS, 5);
-  delay(50);  // Tăng từ 5ms lên 50ms
+  swSer2.listen();  // Lắng nghe cổng 2
+  delay(100);       // Tăng delay chờ ổn định
+  swSer2.flush();   // Flush buffer
   
+  // Xóa buffer cũ
+  while (swSer2.available()) swSer2.read();
+  
+  // Gửi yêu cầu
+  swSer2.write('R');
+  
+  // Đợi phản hồi (timeout 300ms)
   unsigned long timeout = millis();
-  while (Wire.available() < 5 && (millis() - timeout < 500)) {
+  while (swSer2.available() < 5 && (millis() - timeout < 300)) {
     delay(1);
   }
   
-  int available = Wire.available();
-  Serial.print("[Slave2] Requested 5 bytes, received: ");
-  Serial.print(available);
-  Serial.println(" bytes");
+  int available = swSer2.available();
   
   if (available >= 5) {
-    slave2Data.doorOpen = Wire.read() == 1;
-    slave2Data.autoOpenActive = Wire.read() == 1;
-    slave2Data.rfidAccess = Wire.read() == 1;
+    slave2Data.doorOpen = swSer2.read() == 1;
+    slave2Data.autoOpenActive = swSer2.read() == 1;
+    slave2Data.rfidAccess = swSer2.read() == 1;
     
-    int16_t distInt = (Wire.read() << 8) | Wire.read();
+    int16_t distInt = (swSer2.read() << 8) | swSer2.read();
     slave2Data.distance = distInt / 10.0;
     
     Serial.println("✓ Slave2 data read OK");
-  } else if (available == 0) {
-    Serial.println("✗ Slave2 NO RESPONSE - Check wiring!");
   } else {
-    Serial.print("✗ Slave2 INCOMPLETE - Got ");
-    Serial.print(available);
-    Serial.println("/5 bytes");
-  }
-  
-  while (Wire.available()) Wire.read();
-}
-
-// ===== SCAN I2C =====
-void scanI2C() {
-  Serial.println("\n=== Scanning I2C Bus ===");
-  byte count = 0;
-  
-  for (byte address = 1; address < 127; address++) {
-    Wire.beginTransmission(address);
-    byte error = Wire.endTransmission();
+    Serial.print("✗ Slave2 Timeout/Incomplete: ");
+    Serial.println(available);
     
-    if (error == 0) {
-      Serial.print("✓ Device at 0x");
-      if (address < 16) Serial.print("0");
-      Serial.print(address, HEX);
-      if (address == 8) Serial.print(" <- Uno 1");
-      if (address == 9) Serial.print(" <- Uno 2");
-      Serial.println();
-      count++;
+    // RETRY ONCE
+    Serial.println("  Retrying Slave 2...");
+    while (swSer2.available()) swSer2.read();
+    swSer2.write('R');
+    timeout = millis();
+    while (swSer2.available() < 5 && (millis() - timeout < 300)) {
+      delay(1);
+    }
+    if (swSer2.available() >= 5) {
+       // Read data (duplicate code simplified)
+       slave2Data.doorOpen = swSer2.read() == 1;
+       slave2Data.autoOpenActive = swSer2.read() == 1;
+       slave2Data.rfidAccess = swSer2.read() == 1;
+       int16_t distInt = (swSer2.read() << 8) | swSer2.read();
+       slave2Data.distance = distInt / 10.0;
+       Serial.println("✓ Slave2 Retry OK");
     }
   }
-  
-  Serial.print("Found ");
-  Serial.print(count);
-  Serial.println(" device(s)\n");
 }
 
 // ===== GỬI LỆNH ĐẾN SLAVE =====
 void sendCommandToSlave1(byte command) {
-  Wire.beginTransmission(SLAVE1_ADDRESS);
-  Wire.write(command);
-  Wire.endTransmission();
+  swSer1.listen();
+  swSer1.write('C');     // Header lệnh
+  swSer1.write(command); // Mã lệnh
   Serial.print("→ Slave1 cmd: 0x");
   Serial.println(command, HEX);
 }
 
 void sendCommandToSlave2(byte command) {
-  Wire.beginTransmission(SLAVE2_ADDRESS);
-  Wire.write(command);
-  Wire.endTransmission();
+  swSer2.listen();
+  swSer2.write('C');     // Header lệnh
+  swSer2.write(command); // Mã lệnh
   Serial.print("→ Slave2 cmd: 0x");
   Serial.println(command, HEX);
 }

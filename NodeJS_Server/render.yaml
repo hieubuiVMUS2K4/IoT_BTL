@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: iot-mqtt-server
+    env: node
+    buildCommand: npm install
+    startCommand: node server_mqtt.js
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: WS_PORT
+        value: 3001
+      - key: MQTT_BROKER
+        sync: false

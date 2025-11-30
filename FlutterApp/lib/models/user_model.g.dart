@@ -1,5 +1,10 @@
-// Generated file - Tạo bằng build_runner
+// GENERATED CODE - DO NOT MODIFY BY HAND
+
 part of 'user_model.dart';
+
+// **************************************************************************
+// JsonSerializableGenerator
+// **************************************************************************
 
 User _$UserFromJson(Map<String, dynamic> json) => User(
       id: json['id'] as String,

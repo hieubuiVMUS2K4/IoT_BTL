@@ -68,6 +68,8 @@ class IoTProvider with ChangeNotifier {
         autoOpen: jsonData['autoOpen'] ?? false,
         rfidAccess: jsonData['rfid'] ?? false,
         distance: (jsonData['distance'] ?? 0).toDouble(),
+        securityMode: jsonData['securityMode'] ?? false,
+        intruder: jsonData['intruder'] ?? false,
         timestamp: DateTime.now(),
         online: true,
       );
@@ -123,6 +125,26 @@ class IoTProvider with ChangeNotifier {
       return await _iotService.controlFan(action);
     } catch (e) {
       print('Error controlling fan: $e');
+      return false;
+    }
+  }
+
+  // Điều khiển Security Mode
+  Future<bool> toggleSecurityMode() async {
+    try {
+      final action = _data.securityMode ? 'off' : 'on';
+      final success = await _iotService.controlDevice('security', action);
+      if (success) {
+        // Cập nhật local state ngay lập tức để UI responsive
+        _data = _data.copyWith(
+          securityMode: !_data.securityMode,
+          intruder: false, // Reset intruder khi toggle
+        );
+        notifyListeners();
+      }
+      return success;
+    } catch (e) {
+      print('Error toggling security mode: $e');
       return false;
     }
   }
