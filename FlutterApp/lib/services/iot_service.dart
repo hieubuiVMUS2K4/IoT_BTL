@@ -10,8 +10,8 @@ class IoTService {
   WebSocketChannel? _channel;
 
   IoTService({
-    this.baseUrl = 'http://10.137.147.176:3000', // Thay IP của PC
-    this.wsUrl = 'ws://10.137.147.176:3001',
+    this.baseUrl = 'https://iot-btl-9tr7.onrender.com', // Cloud server URL
+    this.wsUrl = 'wss://iot-btl-9tr7.onrender.com',     // Cloud WebSocket URL (secure)
   });
 
   // Kết nối WebSocket

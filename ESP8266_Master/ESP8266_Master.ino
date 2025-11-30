@@ -15,14 +15,18 @@
 #include <PubSubClient.h>
 #include <SoftwareSerial.h>
 #include <ArduinoJson.h>
+#include <WiFiClientSecure.h>  // Thêm để hỗ trợ TLS
 
 // ===== CẤU HÌNH WIFI =====
 const char* ssid = "tinhvdth";
 const char* password = "123456789tt";
 
 // ===== CẤU HÌNH MQTT =====
-const char* mqtt_server = "10.137.147.176";  // IP máy chạy Mosquitto
-const int mqtt_port = 1883;
+// CLOUD: HiveMQ Cloud MQTT Broker
+const char* mqtt_server = "5013cd33cc4841a0b2537c65d64aa6e7.s1.eu.hivemq.cloud";
+const int mqtt_port = 8883;  // TLS port
+const char* mqtt_username = "iot_device";
+const char* mqtt_password = "bacJjRNFYB@v9JT";
 const char* mqtt_client_id = "ESP8266_IoT_Master";
 
 // MQTT Topics
@@ -65,7 +69,7 @@ struct Slave2Data {
 Slave2Data slave2Data;
 
 // ===== MQTT CLIENT =====
-WiFiClient espClient;
+WiFiClientSecure espClient;  // Đổi sang WiFiClientSecure cho TLS
 PubSubClient mqttClient(espClient);
 
 // ===== BIẾN ĐIỀU KHIỂN =====
@@ -87,6 +91,9 @@ void setup() {
   
   // Kết nối WiFi
   connectWiFi();
+  
+  // Cấu hình TLS cho HiveMQ Cloud
+  espClient.setInsecure();  // Bỏ qua certificate verification
   
   // Cấu hình MQTT
   mqttClient.setServer(mqtt_server, mqtt_port);
@@ -149,7 +156,8 @@ void reconnectMQTT() {
   while (!mqttClient.connected()) {
     Serial.print("Connecting to MQTT...");
     
-    if (mqttClient.connect(mqtt_client_id)) {
+    // Kết nối với username và password cho HiveMQ Cloud
+    if (mqttClient.connect(mqtt_client_id, mqtt_username, mqtt_password)) {
       Serial.println(" ✓ Connected!");
       
       // Subscribe control topics
