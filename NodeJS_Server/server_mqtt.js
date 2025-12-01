@@ -109,8 +109,17 @@ mqttClient.on('close', () => {
   systemData.online = false;
 });
 
-// ===== WEBSOCKET SERVER =====
-const wss = new WebSocket.Server({ port: WS_PORT });
+// ===== HTTP SERVER =====
+const server = app.listen(PORT, () => {
+  console.log(`\n=== IoT MQTT Bridge Server ===`);
+  console.log(`HTTP Server: http://localhost:${PORT}`);
+  console.log(`WebSocket: ws://localhost:${PORT}`);
+  console.log(`MQTT Broker: ${mqttBroker}`);
+  console.log(`==============================\n`);
+});
+
+// ===== WEBSOCKET SERVER (on same port as HTTP) =====
+const wss = new WebSocket.Server({ server });
 
 wss.on('connection', (ws) => {
   console.log('✓ WebSocket client connected');
@@ -212,19 +221,11 @@ app.get('/api/commands', (req, res) => {
   res.json({});
 });
 
-// ===== START SERVER =====
-app.listen(PORT, () => {
-  console.log(`\n=== IoT MQTT Bridge Server ===`);
-  console.log(`HTTP Server: http://localhost:${PORT}`);
-  console.log(`WebSocket Server: ws://localhost:${WS_PORT}`);
-  console.log(`MQTT Broker: ${mqttBroker}`);
-  console.log(`==============================\n`);
-});
-
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\nShutting down...');
   mqttClient.end();
   wss.close();
+  server.close();
   process.exit();
 });

@@ -11,7 +11,7 @@ class IoTService {
 
   IoTService({
     this.baseUrl = 'https://iot-btl-9tr7.onrender.com', // Cloud server URL
-    this.wsUrl = 'wss://iot-btl-9tr7.onrender.com',     // Cloud WebSocket URL (secure)
+    this.wsUrl = 'wss://iot-btl-9tr7.onrender.com',     // Cloud WebSocket (same port as HTTP)
   });
 
   // Kết nối WebSocket
