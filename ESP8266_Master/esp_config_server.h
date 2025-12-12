@@ -75,17 +75,20 @@ void saveConfigToEEPROM() {
   Serial.println("Config saved to EEPROM");
 }
 
-// AP Mode disabled - ESP8266 only works in STA mode
-/*
 void startAPMode() {
   apModeActive = true;
-  WiFi.mode(WIFI_AP);
+  WiFi.mode(WIFI_AP_STA);  // Cho phép cả AP và STA để scan WiFi
   WiFi.softAP("ESP8266_SmartHome", "12345678");
-  Serial.println("AP Mode Started");
-  Serial.print("AP IP: ");
+  Serial.println("\n========================================");
+  Serial.println("✓ AP Mode Started!");
+  Serial.println("WiFi Name: ESP8266_SmartHome");
+  Serial.println("Password:  12345678");
+  Serial.print("AP IP:     ");
   Serial.println(WiFi.softAPIP());
+  Serial.println("========================================");
+  Serial.println("Open Flutter app and enter IP: 192.168.4.1");
+  Serial.println("========================================\n");
 }
-*/
 
 void sendCorsHeaders() {
   configServer.sendHeader("Access-Control-Allow-Origin", "*");

@@ -299,6 +299,11 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // ===== HƯỚNG DẪN KẾT NỐI =====
+                    _buildConnectionGuide(),
+                    
+                    const SizedBox(height: 24),
+                    
                     // ===== ESP IP INPUT =====
                     _buildSectionTitle('Địa chỉ ESP'),
                     Card(
@@ -343,7 +348,7 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
                     ],
                     
                     // ===== WIFI CONFIG =====
-                    _buildSectionTitle('Cấu hình WiFi'),
+                    _buildSectionTitle('Cấu hình WiFi mới'),
                     _buildWifiConfigCard(),
                     
                     const SizedBox(height: 24),
@@ -371,6 +376,109 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildConnectionGuide() {
+    return Card(
+      color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.info_outline, 
+                    color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  'Hướng dẫn kết nối',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const Divider(),
+            const SizedBox(height: 8),
+            _buildGuideStep(1, 'Khi ESP không có WiFi, nó sẽ phát mạng:', 
+                boldText: 'ESP8266_SmartHome'),
+            _buildGuideStep(2, 'Mật khẩu WiFi:', boldText: '12345678'),
+            _buildGuideStep(3, 'Kết nối điện thoại/máy tính vào mạng đó'),
+            _buildGuideStep(4, 'Nhập IP:', boldText: '192.168.4.1'),
+            _buildGuideStep(5, 'Nhấn "Kết nối" để cấu hình WiFi mới'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.lightbulb, color: Colors.amber, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Nếu ESP đã kết nối WiFi, dùng IP từ Serial Monitor',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ).animate().fadeIn();
+  }
+
+  Widget _buildGuideStep(int step, String text, {String? boldText}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '$step',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: Theme.of(context).textTheme.bodyMedium,
+                children: [
+                  TextSpan(text: text),
+                  if (boldText != null) ...[
+                    const TextSpan(text: ' '),
+                    TextSpan(
+                      text: boldText,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
