@@ -172,8 +172,8 @@ void connectWiFi() {
     Serial.print("IP: ");
     Serial.println(WiFi.localIP());
   } else {
-    Serial.println("\n✗ WiFi failed! Starting AP mode...");
-    startAPMode();
+    Serial.println("\n✗ WiFi connection failed!");
+    Serial.println("System will retry connection on next loop...");
   }
 }
 

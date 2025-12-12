@@ -75,6 +75,8 @@ void saveConfigToEEPROM() {
   Serial.println("Config saved to EEPROM");
 }
 
+// AP Mode disabled - ESP8266 only works in STA mode
+/*
 void startAPMode() {
   apModeActive = true;
   WiFi.mode(WIFI_AP);
@@ -83,6 +85,7 @@ void startAPMode() {
   Serial.print("AP IP: ");
   Serial.println(WiFi.softAPIP());
 }
+*/
 
 void sendCorsHeaders() {
   configServer.sendHeader("Access-Control-Allow-Origin", "*");
