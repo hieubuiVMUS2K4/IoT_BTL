@@ -54,6 +54,7 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
   }
 
   Future<void> _loadDeviceInfo() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
     
     _wifiService.setEspAddress(_espIpController.text);
@@ -63,37 +64,45 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
       _currentConfig = await _wifiService.getCurrentConfig();
       _otaInfo = await _wifiService.checkForUpdate();
       
-      if (_currentConfig != null) {
+      if (_currentConfig != null && mounted) {
         _ssidController.text = _currentConfig!.ssid;
         _mqttServerController.text = _currentConfig!.mqttServer ?? '';
         _mqttPortController.text = (_currentConfig!.mqttPort ?? 8883).toString();
         _mqttUserController.text = _currentConfig!.mqttUsername ?? '';
       }
     } catch (e) {
-      _showError('Không thể kết nối đến ESP8266: $e');
+      if (mounted) {
+        _showError('Không thể kết nối đến ESP8266: $e');
+      }
     }
     
+    if (!mounted) return;
     setState(() => _isLoading = false);
   }
 
   Future<void> _scanNetworks() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
     
     try {
       _networks = await _wifiService.scanWifiNetworks();
-      if (_networks.isEmpty) {
+      if (_networks.isEmpty && mounted) {
         _showError('Không tìm thấy mạng WiFi nào');
       }
     } catch (e) {
-      _showError('Lỗi quét WiFi: $e');
+      if (mounted) {
+        _showError('Lỗi quét WiFi: $e');
+      }
     }
     
+    if (!mounted) return;
     setState(() => _isLoading = false);
   }
 
   Future<void> _saveWifiConfig() async {
     if (!_formKey.currentState!.validate()) return;
     
+    if (!mounted) return;
     setState(() => _isLoading = true);
     
     try {

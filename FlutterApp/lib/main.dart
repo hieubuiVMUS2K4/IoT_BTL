@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'providers/auth_provider.dart';
 import 'providers/iot_provider.dart';
 import 'screens/splash_screen.dart';
@@ -11,7 +12,9 @@ import 'screens/reports_screen.dart';
 import 'screens/wifi_config_screen.dart';
 import 'screens/admin_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('vi_VN', null);
   runApp(const MyApp());
 }
 
