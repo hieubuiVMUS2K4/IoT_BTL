@@ -1,5 +1,5 @@
 /*
- * ESP8266 - Master UART (SoftwareSerial) + MQTT Client
+ * ESP8266 - Master UART (SoftwareSerial) + MQTT Client + Web Config
  * Nhiệm vụ: Thu thập dữ liệu từ 2 Arduino qua UART, gửi về MQTT Broker
  * 
  * Kết nối phần cứng (UART Software):
@@ -9,6 +9,11 @@
  * MQTT Topics:
  * - Publish: iot/sensors/data (JSON sensor data)
  * - Subscribe: iot/control/# (all control commands)
+ * 
+ * Web Interface:
+ * - http://<ip>/config - WiFi Configuration
+ * - http://<ip>/update - OTA Firmware Update
+ * - http://<ip>/api/info - Device Info API
  */
 
 #include <ESP8266WiFi.h>
@@ -17,16 +22,25 @@
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>  // Thêm để hỗ trợ TLS
 
-// ===== CẤU HÌNH WIFI =====
-const char* ssid = "tinhvdth";
-const char* password = "123456789tt";
+// ===== FORWARD DECLARATIONS =====
+void mqttCallback(char* topic, byte* payload, unsigned int length);
 
-// ===== CẤU HÌNH MQTT =====
-// CLOUD: HiveMQ Cloud MQTT Broker
-const char* mqtt_server = "5013cd33cc4841a0b2537c65d64aa6e7.s1.eu.hivemq.cloud";
-const int mqtt_port = 8883;  // TLS port
-const char* mqtt_username = "iot_device";
-const char* mqtt_password = "bacJjRNFYB@v9JT";
+// ===== MQTT CLIENT (khai báo trước để esp_config_server.h có thể dùng) =====
+WiFiClientSecure espClient;  // Đổi sang WiFiClientSecure cho TLS
+PubSubClient mqttClient(espClient);
+
+// ===== INCLUDE CONFIG SERVER =====
+#include "esp_config_server.h"
+
+// ===== CẤU HÌNH WIFI (fallback nếu chưa config) =====
+const char* fallback_ssid = "tinhvdth";
+const char* fallback_password = "123456789tt";
+
+// ===== CẤU HÌNH MQTT (fallback nếu chưa config) =====
+const char* fallback_mqtt_server = "5013cd33cc4841a0b2537c65d64aa6e7.s1.eu.hivemq.cloud";
+const int fallback_mqtt_port = 8883;
+const char* fallback_mqtt_username = "iot_device";
+const char* fallback_mqtt_password = "bacJjRNFYB@v9JT";
 const char* mqtt_client_id = "ESP8266_IoT_Master";
 
 // MQTT Topics
@@ -68,10 +82,6 @@ struct Slave2Data {
 };
 Slave2Data slave2Data;
 
-// ===== MQTT CLIENT =====
-WiFiClientSecure espClient;  // Đổi sang WiFiClientSecure cho TLS
-PubSubClient mqttClient(espClient);
-
 // ===== BIẾN ĐIỀU KHIỂN =====
 unsigned long lastUpdate = 0;
 const unsigned long updateInterval = 2000;  // 2 giây cập nhật 1 lần
@@ -82,12 +92,15 @@ bool intruderDetected = false;    // Phát hiện xâm nhập
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n\n=== ESP8266 MQTT IoT System (UART Version) ===");
+  Serial.println("\n\n=== ESP8266 MQTT IoT System (UART + Web Config) ===");
   
   // Khởi tạo SoftwareSerial
   swSer1.begin(9600);
   swSer2.begin(9600);
   Serial.println("SoftwareSerial initialized (9600 baud)");
+  
+  // Khởi tạo Config Server (load config từ EEPROM)
+  setupConfigServer();
   
   // Kết nối WiFi
   connectWiFi();
@@ -95,14 +108,22 @@ void setup() {
   // Cấu hình TLS cho HiveMQ Cloud
   espClient.setInsecure();  // Bỏ qua certificate verification
   
-  // Cấu hình MQTT
+  // Cấu hình MQTT (sử dụng config từ EEPROM nếu có)
+  const char* mqtt_server = isConfigured() ? getSavedMqttServer() : fallback_mqtt_server;
+  int mqtt_port = isConfigured() ? getSavedMqttPort() : fallback_mqtt_port;
+  
   mqttClient.setServer(mqtt_server, mqtt_port);
   mqttClient.setCallback(mqttCallback);
   
   Serial.println("System ready!");
+  Serial.print("Web Config: http://");
+  Serial.println(WiFi.localIP());
 }
 
 void loop() {
+  // Xử lý Web Server
+  handleConfigServer();
+  
   // Kết nối WiFi
   if (WiFi.status() != WL_CONNECTED) {
     connectWiFi();
@@ -129,11 +150,15 @@ void loop() {
 
 // ===== KẾT NỐI WIFI =====
 void connectWiFi() {
+  // Sử dụng config từ EEPROM nếu có
+  const char* wifi_ssid = (isConfigured() && strlen(getSavedSSID()) > 0) ? getSavedSSID() : fallback_ssid;
+  const char* wifi_pass = (isConfigured() && strlen(getSavedPassword()) > 0) ? getSavedPassword() : fallback_password;
+  
   Serial.print("Connecting to WiFi: ");
-  Serial.println(ssid);
+  Serial.println(wifi_ssid);
   
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+  WiFi.begin(wifi_ssid, wifi_pass);
   
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 30) {
@@ -147,17 +172,22 @@ void connectWiFi() {
     Serial.print("IP: ");
     Serial.println(WiFi.localIP());
   } else {
-    Serial.println("\n✗ WiFi failed!");
+    Serial.println("\n✗ WiFi failed! Starting AP mode...");
+    startAPMode();
   }
 }
 
 // ===== KẾT NỐI MQTT =====
 void reconnectMQTT() {
+  // Sử dụng config từ EEPROM nếu có
+  const char* mqtt_user = isConfigured() ? getSavedMqttUser() : fallback_mqtt_username;
+  const char* mqtt_pass = isConfigured() ? getSavedMqttPass() : fallback_mqtt_password;
+  
   while (!mqttClient.connected()) {
     Serial.print("Connecting to MQTT...");
     
-    // Kết nối với username và password cho HiveMQ Cloud
-    if (mqttClient.connect(mqtt_client_id, mqtt_username, mqtt_password)) {
+    // Kết nối với username và password
+    if (mqttClient.connect(mqtt_client_id, mqtt_user, mqtt_pass)) {
       Serial.println(" ✓ Connected!");
       
       // Subscribe control topics

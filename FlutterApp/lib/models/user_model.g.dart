@@ -16,6 +16,7 @@ User _$UserFromJson(Map<String, dynamic> json) => User(
       lastLogin: json['lastLogin'] == null
           ? null
           : DateTime.parse(json['lastLogin'] as String),
+      isActive: json['isActive'] as bool? ?? true,
     );
 
 Map<String, dynamic> _$UserToJson(User instance) => <String, dynamic>{
@@ -26,6 +27,7 @@ Map<String, dynamic> _$UserToJson(User instance) => <String, dynamic>{
       'role': instance.role,
       'createdAt': instance.createdAt.toIso8601String(),
       'lastLogin': instance.lastLogin?.toIso8601String(),
+      'isActive': instance.isActive,
     };
 
 UserCredential _$UserCredentialFromJson(Map<String, dynamic> json) =>

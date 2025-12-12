@@ -6,6 +6,10 @@ import 'providers/iot_provider.dart';
 import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/dashboard_screen.dart';
+import 'screens/reports_screen.dart';
+import 'screens/wifi_config_screen.dart';
+import 'screens/admin_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -44,6 +48,10 @@ class MyApp extends StatelessWidget {
         routes: {
           '/login': (context) => const LoginScreen(),
           '/home': (context) => const HomeScreen(),
+          '/dashboard': (context) => const DashboardScreen(),
+          '/reports': (context) => const ReportsScreen(),
+          '/wifi-config': (context) => const WifiConfigScreen(),
+          '/admin': (context) => const AdminScreen(),
         },
       ),
     );

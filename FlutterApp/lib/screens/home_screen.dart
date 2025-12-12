@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../providers/auth_provider.dart';
 import '../providers/iot_provider.dart';
+import '../models/user_model.dart';
 import '../widgets/sensor_card.dart';
 import '../widgets/control_card.dart';
 import '../widgets/connection_status.dart';
@@ -81,6 +82,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
     final iotProvider = Provider.of<IoTProvider>(context);
+    // final user = authProvider.currentUser;
+    // final permissions = user?.permissions;
 
     return Scaffold(
       appBar: AppBar(
@@ -113,6 +116,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
+      drawer: _buildNavigationDrawer(context, authProvider),
       body: RefreshIndicator(
         onRefresh: _handleRefresh,
         child: iotProvider.isLoading && !iotProvider.isConnected
@@ -549,6 +553,124 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: success ? Colors.orange : Colors.red,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Widget _buildNavigationDrawer(BuildContext context, AuthProvider authProvider) {
+    final user = authProvider.currentUser;
+    final permissions = user?.permissions;
+
+    return Drawer(
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          UserAccountsDrawerHeader(
+            accountName: Text(user?.fullName ?? 'User'),
+            accountEmail: Text(user?.email ?? ''),
+            currentAccountPicture: CircleAvatar(
+              backgroundColor: Colors.white,
+              child: Text(
+                (user?.fullName ?? 'U').substring(0, 1).toUpperCase(),
+                style: TextStyle(
+                  fontSize: 32,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+            ),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            otherAccountsPictures: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  user?.userRole.displayName ?? 'User',
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          
+          // Home
+          ListTile(
+            leading: const Icon(Icons.home),
+            title: const Text('Trang chủ'),
+            selected: true,
+            onTap: () => Navigator.pop(context),
+          ),
+          
+          // Dashboard
+          if (permissions?.canViewDashboard ?? false)
+            ListTile(
+              leading: const Icon(Icons.dashboard),
+              title: const Text('Dashboard'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/dashboard');
+              },
+            ),
+          
+          // Reports
+          if (permissions?.canViewReports ?? false)
+            ListTile(
+              leading: const Icon(Icons.analytics),
+              title: const Text('Báo cáo'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/reports');
+              },
+            ),
+          
+          const Divider(),
+          
+          // Admin section
+          if (permissions?.canManageUsers ?? false) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                'QUẢN TRỊ',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.people),
+              title: const Text('Quản lý người dùng'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/admin');
+              },
+            ),
+          ],
+          
+          // WiFi Config
+          if (permissions?.canConfigureWifi ?? false)
+            ListTile(
+              leading: const Icon(Icons.wifi),
+              title: const Text('Cấu hình WiFi ESP'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/wifi-config');
+              },
+            ),
+          
+          const Divider(),
+          
+          // Logout
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.red),
+            title: const Text('Đăng xuất', style: TextStyle(color: Colors.red)),
+            onTap: _handleLogout,
+          ),
+        ],
       ),
     );
   }

@@ -119,6 +119,31 @@ class DatabaseService {
     }
   }
 
+  // Xóa user
+  Future<void> deleteUser(String userId) async {
+    try {
+      // Xóa user
+      final users = await getUsers();
+      users.removeWhere((u) => u.id == userId);
+      
+      final usersFile = await _usersDbFile;
+      await usersFile.writeAsString(
+        jsonEncode(users.map((u) => u.toJson()).toList()),
+      );
+      
+      // Xóa credentials
+      final credFile = await _credentialsDbFile;
+      if (await credFile.exists()) {
+        final contents = await credFile.readAsString();
+        final Map<String, dynamic> allCredentials = jsonDecode(contents);
+        allCredentials.remove(userId);
+        await credFile.writeAsString(jsonEncode(allCredentials));
+      }
+    } catch (e) {
+      print('Error deleting user: $e');
+    }
+  }
+
   // Lấy credentials của user
   Future<UserCredential?> getUserCredentials(String userId) async {
     try {

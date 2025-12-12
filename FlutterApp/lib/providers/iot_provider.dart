@@ -2,19 +2,25 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../models/iot_data_model.dart';
+import '../models/report_model.dart';
 import '../services/iot_service.dart';
+import '../services/report_service.dart';
 
 class IoTProvider with ChangeNotifier {
   final IoTService _iotService = IoTService();
+  final ReportService _reportService = ReportService();
   
   IoTData _data = IoTData.initial();
+  IoTData? _previousData; // Để so sánh và phát hiện sự kiện
   bool _isConnected = false;
   bool _isLoading = false;
   StreamSubscription? _wsSubscription;
+  Timer? _recordTimer; // Timer để lưu sensor data định kỳ
 
   IoTData get data => _data;
   bool get isConnected => _isConnected;
   bool get isLoading => _isLoading;
+  ReportService get reportService => _reportService;
 
   // Kết nối WebSocket
   void connectWebSocket() {
@@ -35,16 +41,19 @@ class IoTProvider with ChangeNotifier {
         onError: (error) {
           print('WebSocket error: $error');
           _isConnected = false;
+          _stopRecordTimer();
           notifyListeners();
         },
         onDone: () {
           print('WebSocket disconnected');
           _isConnected = false;
+          _stopRecordTimer();
           notifyListeners();
         },
       );
 
       _isConnected = true;
+      _startRecordTimer(); // Bắt đầu lưu sensor data định kỳ
       notifyListeners();
     } catch (e) {
       print('Error connecting WebSocket: $e');
@@ -53,10 +62,111 @@ class IoTProvider with ChangeNotifier {
     }
   }
 
+  // Bắt đầu timer lưu sensor data (mỗi 5 phút)
+  void _startRecordTimer() {
+    _recordTimer?.cancel();
+    _recordTimer = Timer.periodic(const Duration(minutes: 5), (timer) {
+      _saveSensorRecord();
+    });
+    // Lưu ngay lần đầu khi kết nối
+    _saveSensorRecord();
+  }
+
+  // Dừng timer
+  void _stopRecordTimer() {
+    _recordTimer?.cancel();
+    _recordTimer = null;
+  }
+
+  // Lưu sensor record
+  Future<void> _saveSensorRecord() async {
+    if (!_isConnected || !_data.online) return;
+    
+    // ReportService sẽ tự convert IoTData thành SensorRecord
+    await _reportService.saveSensorRecord(_data);
+  }
+
+  // Phát hiện và lưu sự kiện
+  Future<void> _detectAndSaveEvents(IoTData newData) async {
+    if (_previousData == null) {
+      _previousData = newData;
+      return;
+    }
+
+    final prev = _previousData!;
+    final now = DateTime.now();
+    final eventId = () => now.millisecondsSinceEpoch.toString();
+
+    // PIR motion detected
+    if (!prev.pirActive && newData.pirActive) {
+      await _reportService.saveSystemEvent(SystemEvent(
+        id: eventId(),
+        timestamp: now,
+        type: EventType.motionDetected,
+        description: 'Phát hiện chuyển động từ cảm biến PIR',
+        metadata: {'distance': newData.distance},
+      ));
+    }
+
+    // Door opened/closed
+    if (!prev.doorOpen && newData.doorOpen) {
+      await _reportService.saveSystemEvent(SystemEvent(
+        id: eventId(),
+        timestamp: now,
+        type: EventType.doorOpened,
+        description: 'Cửa đã được mở',
+      ));
+    } else if (prev.doorOpen && !newData.doorOpen) {
+      await _reportService.saveSystemEvent(SystemEvent(
+        id: eventId(),
+        timestamp: now,
+        type: EventType.doorClosed,
+        description: 'Cửa đã đóng',
+      ));
+    }
+
+    // Intruder alert
+    if (!prev.intruder && newData.intruder) {
+      await _reportService.saveSystemEvent(SystemEvent(
+        id: eventId(),
+        timestamp: now,
+        type: EventType.intruderAlert,
+        description: 'CẢNH BÁO: Phát hiện xâm nhập!',
+        metadata: {'securityMode': newData.securityMode},
+      ));
+    }
+
+    // Security mode changed
+    if (prev.securityMode != newData.securityMode) {
+      await _reportService.saveSystemEvent(SystemEvent(
+        id: eventId(),
+        timestamp: now,
+        type: newData.securityMode 
+            ? EventType.securityModeOn 
+            : EventType.securityModeOff,
+        description: newData.securityMode 
+            ? 'Chế độ bảo mật đã được BẬT'
+            : 'Chế độ bảo mật đã được TẮT',
+      ));
+    }
+
+    // RFID access
+    if (!prev.rfidAccess && newData.rfidAccess) {
+      await _reportService.saveSystemEvent(SystemEvent(
+        id: eventId(),
+        timestamp: now,
+        type: EventType.rfidAccess,
+        description: 'Truy cập bằng thẻ RFID',
+      ));
+    }
+
+    _previousData = newData;
+  }
+
   // Cập nhật dữ liệu
   void _updateData(Map<String, dynamic> jsonData) {
     try {
-      _data = IoTData(
+      final newData = IoTData(
         temperature: (jsonData['temperature'] ?? 0).toDouble(),
         humidity: (jsonData['humidity'] ?? 0).toDouble(),
         pirActive: jsonData['pir'] ?? false,
@@ -73,6 +183,11 @@ class IoTProvider with ChangeNotifier {
         timestamp: DateTime.now(),
         online: true,
       );
+      
+      // Phát hiện và lưu sự kiện trước khi cập nhật data
+      _detectAndSaveEvents(newData);
+      
+      _data = newData;
       notifyListeners();
     } catch (e) {
       print('Error updating data: $e');
@@ -165,6 +280,7 @@ class IoTProvider with ChangeNotifier {
 
   // Ngắt kết nối
   void disconnect() {
+    _stopRecordTimer();
     _wsSubscription?.cancel();
     _iotService.disconnectWebSocket();
     _isConnected = false;
