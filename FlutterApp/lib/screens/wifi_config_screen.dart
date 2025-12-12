@@ -20,15 +20,10 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
   final _ssidController = TextEditingController();
   final _passwordController = TextEditingController();
   final _espIpController = TextEditingController(text: '192.168.4.1');
-  final _mqttServerController = TextEditingController();
-  final _mqttPortController = TextEditingController(text: '8883');
-  final _mqttUserController = TextEditingController();
-  final _mqttPassController = TextEditingController();
   
   // State
   bool _isLoading = false;
   bool _obscurePassword = true;
-  bool _obscureMqttPass = true;
   EspDeviceInfo? _deviceInfo;
   List<WifiNetwork> _networks = [];
   WifiConfig? _currentConfig;
@@ -46,10 +41,6 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
     _ssidController.dispose();
     _passwordController.dispose();
     _espIpController.dispose();
-    _mqttServerController.dispose();
-    _mqttPortController.dispose();
-    _mqttUserController.dispose();
-    _mqttPassController.dispose();
     super.dispose();
   }
 
@@ -66,9 +57,6 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
       
       if (_currentConfig != null && mounted) {
         _ssidController.text = _currentConfig!.ssid;
-        _mqttServerController.text = _currentConfig!.mqttServer ?? '';
-        _mqttPortController.text = (_currentConfig!.mqttPort ?? 8883).toString();
-        _mqttUserController.text = _currentConfig!.mqttUsername ?? '';
       }
     } catch (e) {
       if (mounted) {
@@ -109,16 +97,10 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
       final config = WifiConfig(
         ssid: _ssidController.text,
         password: _passwordController.text,
-        mqttServer: _mqttServerController.text.isNotEmpty 
-            ? _mqttServerController.text 
-            : null,
-        mqttPort: int.tryParse(_mqttPortController.text),
-        mqttUsername: _mqttUserController.text.isNotEmpty 
-            ? _mqttUserController.text 
-            : null,
-        mqttPassword: _mqttPassController.text.isNotEmpty 
-            ? _mqttPassController.text 
-            : null,
+        mqttServer: null,
+        mqttPort: null,
+        mqttUsername: null,
+        mqttPassword: null,
       );
       
       final success = await _wifiService.updateWifiConfig(config);
@@ -366,12 +348,6 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
                     
                     const SizedBox(height: 24),
                     
-                    // ===== MQTT CONFIG =====
-                    _buildSectionTitle('Cấu hình MQTT'),
-                    _buildMqttConfigCard(),
-                    
-                    const SizedBox(height: 24),
-                    
                     // ===== ACTIONS =====
                     FilledButton.icon(
                       onPressed: _isLoading ? null : _saveWifiConfig,
@@ -578,61 +554,6 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
         ),
       ),
     ).animate().fadeIn(delay: 100.ms);
-  }
-
-  Widget _buildMqttConfigCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            TextFormField(
-              controller: _mqttServerController,
-              decoration: const InputDecoration(
-                labelText: 'MQTT Server',
-                hintText: 'broker.hivemq.com',
-                prefixIcon: Icon(Icons.cloud),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _mqttPortController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'MQTT Port',
-                hintText: '8883',
-                prefixIcon: Icon(Icons.numbers),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _mqttUserController,
-              decoration: const InputDecoration(
-                labelText: 'Username (tùy chọn)',
-                prefixIcon: Icon(Icons.person),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _mqttPassController,
-              obscureText: _obscureMqttPass,
-              decoration: InputDecoration(
-                labelText: 'Password (tùy chọn)',
-                prefixIcon: const Icon(Icons.lock),
-                suffixIcon: IconButton(
-                  icon: Icon(
-                    _obscureMqttPass ? Icons.visibility : Icons.visibility_off,
-                  ),
-                  onPressed: () {
-                    setState(() => _obscureMqttPass = !_obscureMqttPass);
-                  },
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ).animate().fadeIn(delay: 200.ms);
   }
 
   IconData _getSignalIcon(int bars) {
