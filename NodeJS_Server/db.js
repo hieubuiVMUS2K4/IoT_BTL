@@ -2,15 +2,17 @@ const { Pool } = require('pg');
 require('dotenv').config();
 
 // PostgreSQL connection pool
+// Render Free tier: max 2 concurrent connections
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? {
     rejectUnauthorized: false
   } : false,
-  // Connection pool settings
-  max: 20, // Maximum number of clients
-  idleTimeoutMillis: 30000,
+  // Connection pool settings - Optimized for Render Free tier
+  max: 2, // Render Free tier allows max 2 connections
+  idleTimeoutMillis: 10000, // Close idle connections after 10s
   connectionTimeoutMillis: 10000,
+  allowExitOnIdle: true, // Allow process to exit when pool is idle
 });
 
 // Test connection
