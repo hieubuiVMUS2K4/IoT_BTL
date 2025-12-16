@@ -455,16 +455,26 @@ class ReportService {
     EventType type;
     switch (json['event_type']) {
       case 'INTRUSION':
-        type = EventType.security;
+        type = EventType.intruderAlert;
         break;
       case 'MOTION':
-        type = EventType.motion;
+        type = EventType.motionDetected;
         break;
       case 'CONTROL':
-        type = EventType.deviceControl;
+        // Determine specific control type from description
+        final desc = (json['description'] ?? '').toLowerCase();
+        if (desc.contains('led')) {
+          type = EventType.led2On;
+        } else if (desc.contains('fan')) {
+          type = EventType.fanOn;
+        } else if (desc.contains('door')) {
+          type = EventType.doorOpened;
+        } else {
+          type = EventType.led2On; // Default control event
+        }
         break;
       default:
-        type = EventType.system;
+        type = EventType.motionDetected; // Default fallback
     }
     
     return SystemEvent(

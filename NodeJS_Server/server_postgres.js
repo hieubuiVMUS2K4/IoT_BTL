@@ -53,31 +53,18 @@ let systemData = {
 // ===== LỆNH ĐIỀU KHIỂN =====
 let pendingCommands = {};
 
-// ===== WEBSOCKET SERVER =====
-const wss = new WebSocket.Server({ port: WS_PORT });
+// ===== WEBSOCKET SERVER (will be attached to HTTP server) =====
+let wss;
 
 // Broadcast to all connected WebSocket clients
 function broadcast(data) {
+  if (!wss) return;
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(JSON.stringify(data));
     }
   });
 }
-
-wss.on('connection', (ws) => {
-  console.log('WebSocket client connected');
-  
-  // Gửi dữ liệu hiện tại cho client mới
-  ws.send(JSON.stringify({
-    type: 'init',
-    data: systemData
-  }));
-  
-  ws.on('close', () => {
-    console.log('WebSocket client disconnected');
-  });
-});
 
 // ===== MQTT EVENT HANDLERS =====
 mqttClient.on('connect', () => {
@@ -522,13 +509,30 @@ app.post('/api/admin/clean-data', async (req, res) => {
 
 // ===== START SERVER =====
 initServer().then(() => {
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n=== IoT Server with PostgreSQL + MQTT ===`);
     console.log(`🚀 HTTP Server running on port ${PORT}`);
-    console.log(`🔌 WebSocket Server running on port ${WS_PORT}`);
+    console.log(`🔌 WebSocket attached to HTTP server`);
     console.log(`📊 Database: PostgreSQL connected`);
     console.log(`📡 MQTT Broker: ${mqttBroker}`);
     console.log(`==========================================\n`);
+  });
+  
+  // Attach WebSocket to HTTP server (same port - required for Render)
+  wss = new WebSocket.Server({ server });
+  
+  wss.on('connection', (ws) => {
+    console.log('WebSocket client connected');
+    
+    // Gửi dữ liệu hiện tại cho client mới
+    ws.send(JSON.stringify({
+      type: 'init',
+      data: systemData
+    }));
+    
+    ws.on('close', () => {
+      console.log('WebSocket client disconnected');
+    });
   });
 });
 
