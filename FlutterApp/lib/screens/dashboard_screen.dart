@@ -24,6 +24,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _loadData();
+    // Initialize counters từ server
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final iotProvider = Provider.of<IoTProvider>(context, listen: false);
+      iotProvider.initializeCountersFromServer();
+    });
   }
 
   Future<void> _loadData() async {
@@ -368,8 +373,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildEventsSummary() {
-    final todayStat = _weeklyStats.isNotEmpty ? _weeklyStats.last : null;
-
+    // Sử dụng real-time counters từ IoTProvider
+    final iotProvider = Provider.of<IoTProvider>(context);
+    
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -379,7 +385,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: _EventCountTile(
                 icon: Icons.motion_photos_on,
                 label: 'Chuyển động',
-                count: todayStat?.motionDetectionCount ?? 0,
+                count: iotProvider.todayMotionCount,
                 color: Colors.orange,
               ),
             ),
@@ -387,7 +393,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: _EventCountTile(
                 icon: Icons.door_front_door,
                 label: 'Cửa mở',
-                count: todayStat?.doorOpenCount ?? 0,
+                count: iotProvider.todayDoorOpenCount,
                 color: Colors.blue,
               ),
             ),
@@ -395,7 +401,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: _EventCountTile(
                 icon: Icons.warning,
                 label: 'Cảnh báo',
-                count: todayStat?.intruderAlertCount ?? 0,
+                count: iotProvider.todayIntruderCount,
                 color: Colors.red,
               ),
             ),

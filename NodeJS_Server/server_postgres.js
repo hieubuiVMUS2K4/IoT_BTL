@@ -88,9 +88,10 @@ mqttClient.on('message', async (topic, message) => {
       const data = JSON.parse(message.toString());
       console.log('📥 Data from ESP8266:', data);
       
-      // Check for intrusion change
+      // Check for state changes
       const prevIntruder = systemData.intruder;
       const prevPir = systemData.pir;
+      const prevDoor = systemData.door;
       
       // Update system cache
       systemData = {
@@ -121,6 +122,17 @@ mqttClient.on('message', async (topic, message) => {
         // Log motion event
         if (data.pir && !prevPir) {
           await db.insertEventLog('MOTION', 'Motion detected', 'WARNING');
+        }
+        
+        // Log door events from ESP8266
+        if (data.door !== undefined && data.door !== prevDoor) {
+          if (data.door) {
+            await db.insertEventLog('DOOR', 'Door opened', 'WARNING');
+            console.log('🚪 DOOR OPENED event logged');
+          } else {
+            await db.insertEventLog('DOOR', 'Door closed', 'INFO');
+            console.log('🚪 DOOR CLOSED event logged');
+          }
         }
       } catch (dbErr) {
         console.error('❌ Database save error:', dbErr);

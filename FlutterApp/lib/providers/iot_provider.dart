@@ -17,10 +17,93 @@ class IoTProvider with ChangeNotifier {
   StreamSubscription? _wsSubscription;
   Timer? _recordTimer; // Timer để lưu sensor data định kỳ
 
+  // Real-time event counters (reset mỗi ngày)
+  int _todayMotionCount = 0;
+  int _todayDoorOpenCount = 0;
+  int _todayIntruderCount = 0;
+  DateTime _lastCountResetDate = DateTime.now();
+
   IoTData get data => _data;
   bool get isConnected => _isConnected;
   bool get isLoading => _isLoading;
   ReportService get reportService => _reportService;
+  
+  // Getters for real-time counters
+  int get todayMotionCount => _todayMotionCount;
+  int get todayDoorOpenCount => _todayDoorOpenCount;
+  int get todayIntruderCount => _todayIntruderCount;
+
+  // Reset counters nếu sang ngày mới
+  void _checkAndResetDailyCounters() {
+    final today = DateTime.now();
+    if (today.day != _lastCountResetDate.day || 
+        today.month != _lastCountResetDate.month ||
+        today.year != _lastCountResetDate.year) {
+      _todayMotionCount = 0;
+      _todayDoorOpenCount = 0;
+      _todayIntruderCount = 0;
+      _lastCountResetDate = today;
+    }
+  }
+
+  // Initialize counters từ server data
+  Future<void> initializeCountersFromServer() async {
+    try {
+      final today = DateTime.now();
+      final startOfDay = DateTime(today.year, today.month, today.day);
+      final endOfDay = startOfDay.add(const Duration(days: 1));
+      
+      // Reset counters trước khi đếm lại
+      int motionCount = 0;
+      int doorOpenCount = 0;
+      int intruderCount = 0;
+      
+      // Đếm từ sensor_data cho motion và intruder
+      final records = await _reportService.getServerRecordsByDateRange(startOfDay, endOfDay);
+      
+      if (records.isNotEmpty) {
+        // Sắp xếp theo thời gian
+        records.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        
+        bool lastPir = false;
+        bool lastIntruder = false;
+        
+        for (final record in records) {
+          if (record.pirActive && !lastPir) motionCount++;
+          if (record.intruder && !lastIntruder) intruderCount++;
+          
+          lastPir = record.pirActive;
+          lastIntruder = record.intruder;
+        }
+      }
+      
+      // Đếm door events từ event_logs (vì sensor_data không lưu doorOpen)
+      try {
+        final events = await _reportService.getServerEvents(limit: 500);
+        for (final event in events) {
+          // Chỉ đếm events hôm nay
+          if (event.timestamp.isAfter(startOfDay) && event.timestamp.isBefore(endOfDay)) {
+            if (event.type == EventType.doorOpened) {
+              doorOpenCount++;
+            }
+          }
+        }
+      } catch (e) {
+        print('⚠️  Could not count door events: $e');
+      }
+      
+      // Gán giá trị đã tính
+      _todayMotionCount = motionCount;
+      _todayDoorOpenCount = doorOpenCount;
+      _todayIntruderCount = intruderCount;
+      _lastCountResetDate = today;
+      
+      print('✅ Initialized counters from server: motion=$_todayMotionCount, door=$_todayDoorOpenCount, intruder=$_todayIntruderCount');
+    } catch (e) {
+      print('⚠️  Could not initialize counters from server: $e');
+    }
+    notifyListeners();
+  }
 
   // Kết nối WebSocket
   void connectWebSocket() {
@@ -88,6 +171,9 @@ class IoTProvider with ChangeNotifier {
 
   // Phát hiện và lưu sự kiện
   Future<void> _detectAndSaveEvents(IoTData newData) async {
+    // Check và reset counters nếu sang ngày mới
+    _checkAndResetDailyCounters();
+    
     if (_previousData == null) {
       _previousData = newData;
       return;
@@ -99,6 +185,7 @@ class IoTProvider with ChangeNotifier {
 
     // PIR motion detected
     if (!prev.pirActive && newData.pirActive) {
+      _todayMotionCount++; // Tăng counter real-time
       await _reportService.saveSystemEvent(SystemEvent(
         id: eventId(),
         timestamp: now,
@@ -110,6 +197,7 @@ class IoTProvider with ChangeNotifier {
 
     // Door opened/closed
     if (!prev.doorOpen && newData.doorOpen) {
+      _todayDoorOpenCount++; // Tăng counter real-time
       await _reportService.saveSystemEvent(SystemEvent(
         id: eventId(),
         timestamp: now,
@@ -127,6 +215,7 @@ class IoTProvider with ChangeNotifier {
 
     // Intruder alert
     if (!prev.intruder && newData.intruder) {
+      _todayIntruderCount++; // Tăng counter real-time
       await _reportService.saveSystemEvent(SystemEvent(
         id: eventId(),
         timestamp: now,

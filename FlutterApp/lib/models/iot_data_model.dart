@@ -39,19 +39,55 @@ class IoTData {
   });
 
   factory IoTData.fromJson(Map<String, dynamic> json) {
-    // Convert any numeric values to strings to avoid type errors
+    // Helper function to convert String to num
+    num parseNum(dynamic value, [num defaultValue = 0]) {
+      if (value == null) return defaultValue;
+      if (value is num) return value;
+      if (value is String) return num.tryParse(value) ?? defaultValue;
+      return defaultValue;
+    }
+    
+    // Helper function to parse bool safely
+    bool parseBool(dynamic value, [bool defaultValue = false]) {
+      if (value == null) return defaultValue;
+      if (value is bool) return value;
+      if (value is String) return value.toLowerCase() == 'true';
+      if (value is num) return value != 0;
+      return defaultValue;
+    }
+    
+    // Helper function to parse timestamp
+    String parseTimestamp(dynamic value) {
+      if (value == null) return DateTime.now().toIso8601String();
+      if (value is String) return value;
+      if (value is int) return DateTime.fromMillisecondsSinceEpoch(value).toIso8601String();
+      if (value is DateTime) return value.toIso8601String();
+      return DateTime.now().toIso8601String();
+    }
+    
+    // Convert values and map server field names to Flutter field names
     final cleanedJson = Map<String, dynamic>.from(json);
     
-    // Ensure distance and temperature are strings
-    if (cleanedJson['distance'] != null && cleanedJson['distance'] is! String) {
-      cleanedJson['distance'] = cleanedJson['distance'].toString();
-    }
-    if (cleanedJson['temperature'] != null && cleanedJson['temperature'] is! String) {
-      cleanedJson['temperature'] = cleanedJson['temperature'].toString();
-    }
-    if (cleanedJson['humidity'] != null && cleanedJson['humidity'] is! String) {
-      cleanedJson['humidity'] = cleanedJson['humidity'].toString();
-    }
+    // Numeric fields
+    cleanedJson['temperature'] = parseNum(json['temperature']);
+    cleanedJson['humidity'] = parseNum(json['humidity']);
+    cleanedJson['distance'] = parseNum(json['distance']);
+    
+    // Boolean fields with null safety (server uses 'door', Flutter expects 'doorOpen')
+    cleanedJson['pirActive'] = parseBool(json['pirActive'] ?? json['pir']);
+    cleanedJson['led1'] = parseBool(json['led1']);
+    cleanedJson['led2'] = parseBool(json['led2']);
+    cleanedJson['fan'] = parseBool(json['fan']);
+    cleanedJson['fanAuto'] = parseBool(json['fanAuto'], true);
+    cleanedJson['doorOpen'] = parseBool(json['doorOpen'] ?? json['door']);
+    cleanedJson['autoOpen'] = parseBool(json['autoOpen']);
+    cleanedJson['rfidAccess'] = parseBool(json['rfidAccess'] ?? json['rfid']);
+    cleanedJson['securityMode'] = parseBool(json['securityMode']);
+    cleanedJson['intruder'] = parseBool(json['intruder']);
+    cleanedJson['online'] = parseBool(json['online'], true);
+    
+    // Timestamp - handle both string and int/milliseconds
+    cleanedJson['timestamp'] = parseTimestamp(json['timestamp'] ?? json['lastUpdate']);
     
     return _$IoTDataFromJson(cleanedJson);
   }

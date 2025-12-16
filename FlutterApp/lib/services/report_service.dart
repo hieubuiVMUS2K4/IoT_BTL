@@ -185,14 +185,18 @@ class ReportService {
       return DailyStatistics.empty(date);
     }
 
+    // Sắp xếp records theo thời gian
+    final sortedRecords = List<SensorRecord>.from(records)
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
     // Tính toán temperature
-    final temps = records.map((r) => r.temperature).toList();
+    final temps = sortedRecords.map((r) => r.temperature).toList();
     final avgTemp = temps.reduce((a, b) => a + b) / temps.length;
     final maxTemp = temps.reduce((a, b) => a > b ? a : b);
     final minTemp = temps.reduce((a, b) => a < b ? a : b);
 
     // Tính toán humidity
-    final hums = records.map((r) => r.humidity).toList();
+    final hums = sortedRecords.map((r) => r.humidity).toList();
     final avgHum = hums.reduce((a, b) => a + b) / hums.length;
     final maxHum = hums.reduce((a, b) => a > b ? a : b);
     final minHum = hums.reduce((a, b) => a < b ? a : b);
@@ -206,7 +210,7 @@ class ReportService {
     bool lastDoor = false;
     bool lastIntruder = false;
 
-    for (final record in records) {
+    for (final record in sortedRecords) {
       if (record.pirActive && !lastPir) motionCount++;
       if (record.doorOpen && !lastDoor) doorCount++;
       if (record.intruder && !lastIntruder) intruderCount++;
@@ -216,11 +220,33 @@ class ReportService {
       lastIntruder = record.intruder;
     }
 
-    // Tính thời gian bật (giả sử mỗi record cách nhau 2 giây)
-    const recordInterval = Duration(seconds: 2);
-    int fanOnCount = records.where((r) => r.fan).length;
-    int led1OnCount = records.where((r) => r.led1).length;
-    int led2OnCount = records.where((r) => r.led2).length;
+    // Tính thời gian bật dựa trên khoảng cách thực tế giữa các record
+    Duration fanOnTime = Duration.zero;
+    Duration led1OnTime = Duration.zero;
+    Duration led2OnTime = Duration.zero;
+    
+    for (int i = 0; i < sortedRecords.length - 1; i++) {
+      final current = sortedRecords[i];
+      final next = sortedRecords[i + 1];
+      
+      // Tính khoảng thời gian giữa 2 record (giới hạn tối đa 5 phút để tránh lỗi khi mất kết nối)
+      Duration interval = next.timestamp.difference(current.timestamp);
+      if (interval > const Duration(minutes: 5)) {
+        interval = const Duration(minutes: 5); // Cap at 5 minutes
+      }
+      
+      // Nếu thiết bị đang ON ở record hiện tại, cộng thêm thời gian
+      if (current.fan) fanOnTime += interval;
+      if (current.led1) led1OnTime += interval;
+      if (current.led2) led2OnTime += interval;
+    }
+    
+    // Xử lý record cuối cùng (giả định thiết bị ON thêm 2 giây)
+    final lastRecord = sortedRecords.last;
+    const lastInterval = Duration(seconds: 2);
+    if (lastRecord.fan) fanOnTime += lastInterval;
+    if (lastRecord.led1) led1OnTime += lastInterval;
+    if (lastRecord.led2) led2OnTime += lastInterval;
 
     return DailyStatistics(
       date: date,
@@ -233,9 +259,9 @@ class ReportService {
       motionDetectionCount: motionCount,
       doorOpenCount: doorCount,
       intruderAlertCount: intruderCount,
-      totalFanOnTime: recordInterval * fanOnCount,
-      totalLed1OnTime: recordInterval * led1OnCount,
-      totalLed2OnTime: recordInterval * led2OnCount,
+      totalFanOnTime: fanOnTime,
+      totalLed1OnTime: led1OnTime,
+      totalLed2OnTime: led2OnTime,
     );
   }
 
@@ -368,13 +394,17 @@ class ReportService {
       return DailyStatistics.empty(date);
     }
 
+    // Sắp xếp records theo thời gian
+    final sortedRecords = List<SensorRecord>.from(records)
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
     // Tính toán giống local
-    final temps = records.map((r) => r.temperature).toList();
+    final temps = sortedRecords.map((r) => r.temperature).toList();
     final avgTemp = temps.reduce((a, b) => a + b) / temps.length;
     final maxTemp = temps.reduce((a, b) => a > b ? a : b);
     final minTemp = temps.reduce((a, b) => a < b ? a : b);
 
-    final hums = records.map((r) => r.humidity).toList();
+    final hums = sortedRecords.map((r) => r.humidity).toList();
     final avgHum = hums.reduce((a, b) => a + b) / hums.length;
     final maxHum = hums.reduce((a, b) => a > b ? a : b);
     final minHum = hums.reduce((a, b) => a < b ? a : b);
@@ -387,7 +417,7 @@ class ReportService {
     bool lastDoor = false;
     bool lastIntruder = false;
 
-    for (final record in records) {
+    for (final record in sortedRecords) {
       if (record.pirActive && !lastPir) motionCount++;
       if (record.doorOpen && !lastDoor) doorCount++;
       if (record.intruder && !lastIntruder) intruderCount++;
@@ -397,10 +427,33 @@ class ReportService {
       lastIntruder = record.intruder;
     }
 
-    const recordInterval = Duration(seconds: 2);
-    int fanOnCount = records.where((r) => r.fan).length;
-    int led1OnCount = records.where((r) => r.led1).length;
-    int led2OnCount = records.where((r) => r.led2).length;
+    // Tính thời gian bật dựa trên khoảng cách thực tế giữa các record
+    Duration fanOnTime = Duration.zero;
+    Duration led1OnTime = Duration.zero;
+    Duration led2OnTime = Duration.zero;
+    
+    for (int i = 0; i < sortedRecords.length - 1; i++) {
+      final current = sortedRecords[i];
+      final next = sortedRecords[i + 1];
+      
+      // Tính khoảng thời gian giữa 2 record (giới hạn tối đa 5 phút để tránh lỗi khi mất kết nối)
+      Duration interval = next.timestamp.difference(current.timestamp);
+      if (interval > const Duration(minutes: 5)) {
+        interval = const Duration(minutes: 5); // Cap at 5 minutes
+      }
+      
+      // Nếu thiết bị đang ON ở record hiện tại, cộng thêm thời gian
+      if (current.fan) fanOnTime += interval;
+      if (current.led1) led1OnTime += interval;
+      if (current.led2) led2OnTime += interval;
+    }
+    
+    // Xử lý record cuối cùng (giả định thiết bị ON thêm 2 giây)
+    final lastRecord = sortedRecords.last;
+    const lastInterval = Duration(seconds: 2);
+    if (lastRecord.fan) fanOnTime += lastInterval;
+    if (lastRecord.led1) led1OnTime += lastInterval;
+    if (lastRecord.led2) led2OnTime += lastInterval;
 
     return DailyStatistics(
       date: date,
@@ -413,9 +466,9 @@ class ReportService {
       motionDetectionCount: motionCount,
       doorOpenCount: doorCount,
       intruderAlertCount: intruderCount,
-      totalFanOnTime: recordInterval * fanOnCount,
-      totalLed1OnTime: recordInterval * led1OnCount,
-      totalLed2OnTime: recordInterval * led2OnCount,
+      totalFanOnTime: fanOnTime,
+      totalLed1OnTime: led1OnTime,
+      totalLed2OnTime: led2OnTime,
     );
   }
   
@@ -434,17 +487,25 @@ class ReportService {
   }
   
   // Helper methods để convert server JSON sang models
+  // Helper để parse num từ String hoặc num
+  static num _parseNum(dynamic value, [num defaultValue = 0]) {
+    if (value == null) return defaultValue;
+    if (value is num) return value;
+    if (value is String) return num.tryParse(value) ?? defaultValue;
+    return defaultValue;
+  }
+
   SensorRecord _sensorRecordFromServerJson(Map<String, dynamic> json) {
     return SensorRecord(
       id: json['id'].toString(),
-      temperature: (json['temperature'] as num?)?.toDouble() ?? 0.0,
-      humidity: (json['humidity'] as num?)?.toDouble() ?? 0.0,
+      temperature: _parseNum(json['temperature']).toDouble(),
+      humidity: _parseNum(json['humidity']).toDouble(),
       pirActive: json['pir'] ?? false,
       led1: false, // Server không lưu LED status trong sensor_data
       led2: false,
       fan: false,
       doorOpen: false,
-      distance: json['distance'] ?? 0,
+      distance: _parseNum(json['distance']).toDouble(),
       securityMode: false,
       intruder: json['intruder'] ?? false,
       timestamp: DateTime.parse(json['created_at']),
@@ -453,22 +514,36 @@ class ReportService {
   
   SystemEvent _systemEventFromServerJson(Map<String, dynamic> json) {
     EventType type;
-    switch (json['event_type']) {
+    final eventType = json['event_type']?.toString().toUpperCase() ?? '';
+    final desc = (json['description'] ?? '').toLowerCase();
+    
+    switch (eventType) {
       case 'INTRUSION':
         type = EventType.intruderAlert;
         break;
       case 'MOTION':
         type = EventType.motionDetected;
         break;
+      case 'DOOR':
+        // Door event from ESP8266
+        if (desc.contains('opened') || desc.contains('open')) {
+          type = EventType.doorOpened;
+        } else {
+          type = EventType.doorClosed;
+        }
+        break;
       case 'CONTROL':
-        // Determine specific control type from description
-        final desc = (json['description'] ?? '').toLowerCase();
-        if (desc.contains('led')) {
+        // Control event from app/API
+        if (desc.contains('door')) {
+          if (desc.contains('opened') || desc.contains('open')) {
+            type = EventType.doorOpened;
+          } else {
+            type = EventType.doorClosed;
+          }
+        } else if (desc.contains('led')) {
           type = EventType.led2On;
         } else if (desc.contains('fan')) {
           type = EventType.fanOn;
-        } else if (desc.contains('door')) {
-          type = EventType.doorOpened;
         } else {
           type = EventType.led2On; // Default control event
         }

@@ -33,8 +33,22 @@ class SensorRecord {
     required this.timestamp,
   });
 
-  factory SensorRecord.fromJson(Map<String, dynamic> json) =>
-      _$SensorRecordFromJson(json);
+  // Helper function to convert String to num
+  static num _parseNum(dynamic value, [num defaultValue = 0]) {
+    if (value == null) return defaultValue;
+    if (value is num) return value;
+    if (value is String) return num.tryParse(value) ?? defaultValue;
+    return defaultValue;
+  }
+
+  factory SensorRecord.fromJson(Map<String, dynamic> json) {
+    // Clean numeric fields that might come as strings from PostgreSQL
+    final cleanedJson = Map<String, dynamic>.from(json);
+    cleanedJson['temperature'] = _parseNum(json['temperature']);
+    cleanedJson['humidity'] = _parseNum(json['humidity']);
+    cleanedJson['distance'] = _parseNum(json['distance']);
+    return _$SensorRecordFromJson(cleanedJson);
+  }
   Map<String, dynamic> toJson() => _$SensorRecordToJson(this);
 }
 
@@ -71,8 +85,31 @@ class DailyStatistics {
     required this.totalLed2OnTime,
   });
 
-  factory DailyStatistics.fromJson(Map<String, dynamic> json) =>
-      _$DailyStatisticsFromJson(json);
+  // Helper function to convert String to num
+  static num _parseNum(dynamic value, [num defaultValue = 0]) {
+    if (value == null) return defaultValue;
+    if (value is num) return value;
+    if (value is String) return num.tryParse(value) ?? defaultValue;
+    return defaultValue;
+  }
+
+  factory DailyStatistics.fromJson(Map<String, dynamic> json) {
+    // Clean numeric fields that might come as strings from PostgreSQL
+    final cleanedJson = Map<String, dynamic>.from(json);
+    cleanedJson['avgTemperature'] = _parseNum(json['avgTemperature']);
+    cleanedJson['maxTemperature'] = _parseNum(json['maxTemperature']);
+    cleanedJson['minTemperature'] = _parseNum(json['minTemperature']);
+    cleanedJson['avgHumidity'] = _parseNum(json['avgHumidity']);
+    cleanedJson['maxHumidity'] = _parseNum(json['maxHumidity']);
+    cleanedJson['minHumidity'] = _parseNum(json['minHumidity']);
+    cleanedJson['motionDetectionCount'] = _parseNum(json['motionDetectionCount']);
+    cleanedJson['doorOpenCount'] = _parseNum(json['doorOpenCount']);
+    cleanedJson['intruderAlertCount'] = _parseNum(json['intruderAlertCount']);
+    cleanedJson['totalFanOnTime'] = _parseNum(json['totalFanOnTime']);
+    cleanedJson['totalLed1OnTime'] = _parseNum(json['totalLed1OnTime']);
+    cleanedJson['totalLed2OnTime'] = _parseNum(json['totalLed2OnTime']);
+    return _$DailyStatisticsFromJson(cleanedJson);
+  }
   Map<String, dynamic> toJson() => _$DailyStatisticsToJson(this);
 
   factory DailyStatistics.empty(DateTime date) {

@@ -248,19 +248,31 @@ class _ReportsScreenState extends State<ReportsScreen>
       );
     }
 
+    // Sort events by timestamp (newest first)
+    final sortedEvents = List<SystemEvent>.from(_events)
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
     // Group events by date
     final groupedEvents = <String, List<SystemEvent>>{};
-    for (final event in _events) {
+    for (final event in sortedEvents) {
       final dateKey = DateFormat('dd/MM/yyyy').format(event.timestamp);
       groupedEvents.putIfAbsent(dateKey, () => []);
       groupedEvents[dateKey]!.add(event);
     }
 
+    // Sort date keys from newest to oldest
+    final sortedDateKeys = groupedEvents.keys.toList()
+      ..sort((a, b) {
+        final dateA = DateFormat('dd/MM/yyyy').parse(a);
+        final dateB = DateFormat('dd/MM/yyyy').parse(b);
+        return dateB.compareTo(dateA);
+      });
+
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: groupedEvents.length,
+      itemCount: sortedDateKeys.length,
       itemBuilder: (context, index) {
-        final dateKey = groupedEvents.keys.elementAt(index);
+        final dateKey = sortedDateKeys[index];
         final dayEvents = groupedEvents[dateKey]!;
 
         return Column(
@@ -304,11 +316,15 @@ class _ReportsScreenState extends State<ReportsScreen>
       );
     }
 
+    // Sort statistics by date (newest first)
+    final sortedStats = List<DailyStatistics>.from(_statistics)
+      ..sort((a, b) => b.date.compareTo(a.date));
+
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: _statistics.length,
+      itemCount: sortedStats.length,
       itemBuilder: (context, index) {
-        final stat = _statistics[index];
+        final stat = sortedStats[index];
         return _StatisticsCard(statistics: stat)
             .animate()
             .fadeIn(delay: (index * 100).ms)
