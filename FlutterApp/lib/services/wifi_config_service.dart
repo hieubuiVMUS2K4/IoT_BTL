@@ -1,24 +1,50 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import '../models/report_model.dart';
 
 /// Service để cấu hình WiFi và OTA cho ESP8266
 class WifiConfigService {
   String _espBaseUrl = 'http://192.168.4.1'; // AP mode default IP
+  late http.Client _client;
+  
+  WifiConfigService() {
+    // Tạo HTTP client với custom settings để tránh lỗi socket trên Windows
+    final httpClient = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10)
+      ..badCertificateCallback = (cert, host, port) => true;
+    _client = IOClient(httpClient);
+  }
   
   /// Đặt địa chỉ IP của ESP (khi đã kết nối vào mạng)
   void setEspAddress(String ipAddress) {
     _espBaseUrl = 'http://$ipAddress';
   }
 
+  /// Helper method để thực hiện GET request với retry
+  Future<http.Response?> _getWithRetry(String url, {int retries = 3}) async {
+    for (int i = 0; i < retries; i++) {
+      try {
+        final response = await _client.get(Uri.parse(url))
+            .timeout(const Duration(seconds: 8));
+        return response;
+      } catch (e) {
+        print('Attempt ${i + 1}/$retries failed: $e');
+        if (i < retries - 1) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
+    }
+    return null;
+  }
+
   /// Lấy thông tin thiết bị ESP8266
   Future<EspDeviceInfo?> getDeviceInfo() async {
     try {
-      final response = await http.get(
-        Uri.parse('$_espBaseUrl/api/info'),
-      ).timeout(const Duration(seconds: 5));
+      final response = await _getWithRetry('$_espBaseUrl/api/info');
 
-      if (response.statusCode == 200) {
+      if (response != null && response.statusCode == 200) {
         final json = jsonDecode(response.body);
         return EspDeviceInfo.fromJson(json);
       }
@@ -32,9 +58,9 @@ class WifiConfigService {
   /// Lấy danh sách WiFi networks
   Future<List<WifiNetwork>> scanWifiNetworks() async {
     try {
-      final response = await http.get(
+      final response = await _client.get(
         Uri.parse('$_espBaseUrl/api/wifi/scan'),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         final List<dynamic> jsonList = jsonDecode(response.body);
@@ -50,11 +76,9 @@ class WifiConfigService {
   /// Lấy cấu hình WiFi hiện tại
   Future<WifiConfig?> getCurrentConfig() async {
     try {
-      final response = await http.get(
-        Uri.parse('$_espBaseUrl/api/wifi/config'),
-      ).timeout(const Duration(seconds: 5));
+      final response = await _getWithRetry('$_espBaseUrl/api/wifi/config');
 
-      if (response.statusCode == 200) {
+      if (response != null && response.statusCode == 200) {
         final json = jsonDecode(response.body);
         return WifiConfig.fromJson(json);
       }
@@ -68,7 +92,7 @@ class WifiConfigService {
   /// Cập nhật cấu hình WiFi
   Future<bool> updateWifiConfig(WifiConfig config) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$_espBaseUrl/api/wifi/config'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(config.toJson()),
@@ -89,7 +113,7 @@ class WifiConfigService {
     String? password,
   }) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$_espBaseUrl/api/mqtt/config'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -110,7 +134,7 @@ class WifiConfigService {
   /// Restart ESP8266
   Future<bool> restartDevice() async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$_espBaseUrl/api/restart'),
       ).timeout(const Duration(seconds: 5));
 
@@ -124,11 +148,9 @@ class WifiConfigService {
   /// Kiểm tra có firmware update không
   Future<OtaUpdateInfo?> checkForUpdate() async {
     try {
-      final response = await http.get(
-        Uri.parse('$_espBaseUrl/api/ota/check'),
-      ).timeout(const Duration(seconds: 5));
+      final response = await _getWithRetry('$_espBaseUrl/api/ota/check');
 
-      if (response.statusCode == 200) {
+      if (response != null && response.statusCode == 200) {
         final json = jsonDecode(response.body);
         return OtaUpdateInfo.fromJson(json);
       }
@@ -142,7 +164,7 @@ class WifiConfigService {
   /// Bắt đầu OTA update
   Future<bool> startOtaUpdate(String firmwareUrl) async {
     try {
-      final response = await http.post(
+      final response = await _client.post(
         Uri.parse('$_espBaseUrl/api/ota/update'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'url': firmwareUrl}),

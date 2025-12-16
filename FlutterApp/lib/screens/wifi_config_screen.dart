@@ -23,6 +23,8 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
   
   // State
   bool _isLoading = false;
+  bool _isConnected = false;  // Trạng thái kết nối ESP
+  String _connectionStatus = 'Chưa kết nối';
   bool _obscurePassword = true;
   EspDeviceInfo? _deviceInfo;
   List<WifiNetwork> _networks = [];
@@ -46,7 +48,10 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
 
   Future<void> _loadDeviceInfo() async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _connectionStatus = 'Đang kết nối...';
+    });
     
     _wifiService.setEspAddress(_espIpController.text);
     
@@ -55,12 +60,25 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
       _currentConfig = await _wifiService.getCurrentConfig();
       _otaInfo = await _wifiService.checkForUpdate();
       
-      if (_currentConfig != null && mounted) {
-        _ssidController.text = _currentConfig!.ssid;
+      if (_deviceInfo != null && mounted) {
+        _isConnected = true;
+        _connectionStatus = '✓ Đã kết nối ESP8266';
+        _showSuccess('Kết nối thành công!');
+        if (_currentConfig != null) {
+          _ssidController.text = _currentConfig!.ssid;
+        }
+      } else {
+        _isConnected = false;
+        _connectionStatus = '✗ Không thể kết nối';
+        if (mounted) {
+          _showError('Không thể kết nối. Hãy chắc chắn bạn đã kết nối WiFi "ESP8266_SmartHome"');
+        }
       }
     } catch (e) {
+      _isConnected = false;
+      _connectionStatus = '✗ Lỗi kết nối';
       if (mounted) {
-        _showError('Không thể kết nối đến ESP8266: $e');
+        _showError('Không thể kết nối. Hãy kết nối WiFi "ESP8266_SmartHome" trước!');
       }
     }
     
@@ -89,6 +107,12 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
 
   Future<void> _saveWifiConfig() async {
     if (!_formKey.currentState!.validate()) return;
+    
+    // Kiểm tra đã kết nối ESP chưa
+    if (!_isConnected) {
+      _showError('Chưa kết nối ESP8266! Hãy kết nối WiFi "ESP8266_SmartHome" và nhấn "Kết nối" trước.');
+      return;
+    }
     
     if (!mounted) return;
     setState(() => _isLoading = true);
@@ -401,6 +425,38 @@ class _WifiConfigScreenState extends State<WifiConfigScreen> {
               ],
             ),
             const Divider(),
+            // Hiển thị trạng thái kết nối
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: _isConnected 
+                    ? Colors.green.withOpacity(0.15) 
+                    : Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _isConnected ? Colors.green : Colors.red.withOpacity(0.5),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _isConnected ? Icons.check_circle : Icons.error_outline,
+                    color: _isConnected ? Colors.green : Colors.red,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _connectionStatus,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: _isConnected ? Colors.green.shade700 : Colors.red.shade700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: 8),
             _buildGuideStep(1, 'Khi ESP không có WiFi, nó sẽ phát mạng:', 
                 boldText: 'ESP8266_SmartHome'),

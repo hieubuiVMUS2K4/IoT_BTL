@@ -121,47 +121,57 @@ void setup() {
 }
 
 void loop() {
-  // Xử lý Web Server
+  // Xử lý Web Server (luôn chạy)
   handleConfigServer();
   
-  // Kết nối WiFi
-  if (WiFi.status() != WL_CONNECTED) {
-    connectWiFi();
-  }
-  
-  // Kết nối MQTT
-  if (!mqttClient.connected()) {
-    reconnectMQTT();
-  }
-  mqttClient.loop();
-  
-  // Đọc dữ liệu từ Arduino
-  readSlave1Data();
-  delay(100);
-  readSlave2Data();
-  delay(100);
-  
-  // Publish dữ liệu
-  if (millis() - lastUpdate > updateInterval) {
-    publishSensorData();
-    lastUpdate = millis();
+  // Kết nối MQTT (chỉ khi WiFi đã kết nối)
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!mqttClient.connected()) {
+      reconnectMQTT();
+    }
+    mqttClient.loop();
+    
+    // Đọc dữ liệu từ Arduino
+    readSlave1Data();
+    delay(100);
+    readSlave2Data();
+    delay(100);
+    
+    // Publish dữ liệu
+    if (millis() - lastUpdate > updateInterval) {
+      publishSensorData();
+      lastUpdate = millis();
+    }
+  } else {
+    // Không có WiFi, chỉ xử lý web server
+    delay(100);
   }
 }
 
 // ===== KẾT NỐI WIFI =====
 void connectWiFi() {
+  // LUÔN phát AP mode để có thể config bất cứ lúc nào
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.softAP("ESP8266_SmartHome", "12345678");
+  Serial.println("\n========================================");
+  Serial.println("✓ AP Mode Always ON!");
+  Serial.println("WiFi Name: ESP8266_SmartHome");
+  Serial.println("Password:  12345678");
+  Serial.print("AP IP:     ");
+  Serial.println(WiFi.softAPIP());
+  Serial.println("========================================");
+  
   // Sử dụng config từ EEPROM nếu có
   const char* wifi_ssid = (isConfigured() && strlen(getSavedSSID()) > 0) ? getSavedSSID() : fallback_ssid;
   const char* wifi_pass = (isConfigured() && strlen(getSavedPassword()) > 0) ? getSavedPassword() : fallback_password;
   
-  Serial.print("Connecting to WiFi: ");
+  Serial.print("Also connecting to WiFi: ");
   Serial.println(wifi_ssid);
   
-  WiFi.mode(WIFI_STA);
   WiFi.begin(wifi_ssid, wifi_pass);
   
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
     delay(500);
     Serial.print(".");
     attempts++;
@@ -169,12 +179,11 @@ void connectWiFi() {
   
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\n✓ WiFi connected!");
-    Serial.print("IP: ");
+    Serial.print("Station IP: ");
     Serial.println(WiFi.localIP());
   } else {
-    Serial.println("\n✗ WiFi connection failed!");
-    Serial.println("⇒ Starting AP Mode for configuration...");
-    startAPMode();
+    Serial.println("\n✗ WiFi not connected, but AP mode still active!");
+    Serial.println("You can configure WiFi via AP: 192.168.4.1");
   }
 }
 

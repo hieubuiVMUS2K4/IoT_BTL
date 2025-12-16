@@ -79,6 +79,8 @@ void startAPMode() {
   apModeActive = true;
   WiFi.mode(WIFI_AP_STA);  // Cho phép cả AP và STA để scan WiFi
   WiFi.softAP("ESP8266_SmartHome", "12345678");
+  delay(500);  // Đợi AP khởi động
+  
   Serial.println("\n========================================");
   Serial.println("✓ AP Mode Started!");
   Serial.println("WiFi Name: ESP8266_SmartHome");
@@ -86,8 +88,14 @@ void startAPMode() {
   Serial.print("AP IP:     ");
   Serial.println(WiFi.softAPIP());
   Serial.println("========================================");
-  Serial.println("Open Flutter app and enter IP: 192.168.4.1");
+  Serial.println("Open browser: http://192.168.4.1");
   Serial.println("========================================\n");
+  
+  // Đảm bảo web server chạy
+  if (!configServer.client()) {
+    configServer.begin();
+    Serial.println("Web server restarted on port 80");
+  }
 }
 
 void sendCorsHeaders() {
@@ -101,15 +109,89 @@ void setupConfigServer() {
   
   // ===== API ENDPOINTS =====
   
+  // Simple ping endpoint (test server đang chạy)
+  configServer.on("/ping", HTTP_GET, []() {
+    configServer.send(200, "text/plain", "pong");
+  });
+  
   // Health check
   configServer.on("/", HTTP_GET, []() {
     sendCorsHeaders();
-    configServer.send(200, "text/html", 
-      "<h1>ESP8266 IoT Smart Home</h1>"
-      "<p>Firmware: " FIRMWARE_VERSION "</p>"
-      "<p><a href='/config'>WiFi Config</a></p>"
-      "<p><a href='/update'>Firmware Update</a></p>"
-    );
+    String html = "<html><head><meta charset='UTF-8'></head><body>";
+    html += "<h1>ESP8266 IoT Smart Home</h1>";
+    html += "<p>Firmware: " FIRMWARE_VERSION "</p>";
+    html += "<p>IP: " + WiFi.softAPIP().toString() + "</p>";
+    html += "<p>Heap: " + String(ESP.getFreeHeap()) + " bytes</p>";
+    html += "<hr>";
+    html += "<form action='/api/wifi/config' method='POST'>";
+    html += "<h2>Cấu hình WiFi</h2>";
+    html += "SSID: <input name='ssid' value='" + String(savedConfig.ssid) + "'><br><br>";
+    html += "Password: <input name='password' type='password'><br><br>";
+    html += "<button type='submit'>Lưu & Restart</button>";
+    html += "</form>";
+    html += "<hr><p><a href='/update'>Firmware Update</a></p>";
+    html += "</body></html>";
+    configServer.send(200, "text/html", html);
+  });
+  
+  // Handle form POST cho web browser
+  configServer.on("/api/wifi/config", HTTP_POST, []() {
+    sendCorsHeaders();
+    
+    // Check if this is form submission
+    if (configServer.hasArg("ssid")) {
+      strlcpy(savedConfig.ssid, configServer.arg("ssid").c_str(), sizeof(savedConfig.ssid));
+      if (configServer.hasArg("password")) {
+        strlcpy(savedConfig.password, configServer.arg("password").c_str(), sizeof(savedConfig.password));
+      }
+      savedConfig.configured = true;
+      saveConfigToEEPROM();
+      
+      configServer.send(200, "text/html", 
+        "<h1>Đã lưu!</h1><p>ESP sẽ restart trong 3 giây...</p>");
+      delay(3000);
+      ESP.restart();
+      return;
+    }
+    
+    // JSON body (from Flutter app)
+    if (configServer.hasArg("plain")) {
+      StaticJsonDocument<512> doc;
+      DeserializationError error = deserializeJson(doc, configServer.arg("plain"));
+      
+      if (error) {
+        configServer.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+      }
+      
+      // Update config
+      if (doc.containsKey("ssid")) {
+        strlcpy(savedConfig.ssid, doc["ssid"], sizeof(savedConfig.ssid));
+      }
+      if (doc.containsKey("password")) {
+        strlcpy(savedConfig.password, doc["password"], sizeof(savedConfig.password));
+      }
+      if (doc.containsKey("mqttServer")) {
+        strlcpy(savedConfig.mqttServer, doc["mqttServer"], sizeof(savedConfig.mqttServer));
+      }
+      if (doc.containsKey("mqttPort")) {
+        savedConfig.mqttPort = doc["mqttPort"];
+      }
+      if (doc.containsKey("mqttUsername")) {
+        strlcpy(savedConfig.mqttUser, doc["mqttUsername"], sizeof(savedConfig.mqttUser));
+      }
+      if (doc.containsKey("mqttPassword")) {
+        strlcpy(savedConfig.mqttPass, doc["mqttPassword"], sizeof(savedConfig.mqttPass));
+      }
+      
+      savedConfig.configured = true;
+      saveConfigToEEPROM();
+      
+      configServer.send(200, "application/json", "{\"success\":true}");
+      return;
+    }
+    
+    configServer.send(400, "application/json", "{\"error\":\"No body\"}");
   });
   
   // Get device info
@@ -120,12 +202,14 @@ void setupConfigServer() {
     doc["deviceId"] = ESP.getChipId();
     doc["firmwareVersion"] = FIRMWARE_VERSION;
     doc["ipAddress"] = WiFi.localIP().toString();
+    doc["apIpAddress"] = WiFi.softAPIP().toString();
     doc["macAddress"] = WiFi.macAddress();
     doc["freeHeap"] = ESP.getFreeHeap();
     doc["uptime"] = millis() / 1000;
     doc["wifiSsid"] = WiFi.SSID();
     doc["wifiRssi"] = WiFi.RSSI();
     doc["mqttConnected"] = mqttClient.connected();
+    doc["apMode"] = apModeActive;
     
     String response;
     serializeJson(doc, response);
@@ -146,49 +230,6 @@ void setupConfigServer() {
     String response;
     serializeJson(doc, response);
     configServer.send(200, "application/json", response);
-  });
-  
-  // Update WiFi config
-  configServer.on("/api/wifi/config", HTTP_POST, []() {
-    sendCorsHeaders();
-    
-    if (!configServer.hasArg("plain")) {
-      configServer.send(400, "application/json", "{\"error\":\"No body\"}");
-      return;
-    }
-    
-    StaticJsonDocument<512> doc;
-    DeserializationError error = deserializeJson(doc, configServer.arg("plain"));
-    
-    if (error) {
-      configServer.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
-      return;
-    }
-    
-    // Update config
-    if (doc.containsKey("ssid")) {
-      strlcpy(savedConfig.ssid, doc["ssid"], sizeof(savedConfig.ssid));
-    }
-    if (doc.containsKey("password")) {
-      strlcpy(savedConfig.password, doc["password"], sizeof(savedConfig.password));
-    }
-    if (doc.containsKey("mqttServer")) {
-      strlcpy(savedConfig.mqttServer, doc["mqttServer"], sizeof(savedConfig.mqttServer));
-    }
-    if (doc.containsKey("mqttPort")) {
-      savedConfig.mqttPort = doc["mqttPort"];
-    }
-    if (doc.containsKey("mqttUsername")) {
-      strlcpy(savedConfig.mqttUser, doc["mqttUsername"], sizeof(savedConfig.mqttUser));
-    }
-    if (doc.containsKey("mqttPassword")) {
-      strlcpy(savedConfig.mqttPass, doc["mqttPassword"], sizeof(savedConfig.mqttPass));
-    }
-    
-    savedConfig.configured = true;
-    saveConfigToEEPROM();
-    
-    configServer.send(200, "application/json", "{\"success\":true}");
   });
   
   // Scan WiFi networks
