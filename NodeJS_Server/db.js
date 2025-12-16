@@ -39,9 +39,9 @@ async function insertSensorData(data) {
   
   try {
     const result = await pool.query(query, [
-      data.temperature || 0,
-      data.humidity || 0,
-      data.distance || 0,
+      parseFloat(data.temperature) || 0,
+      parseFloat(data.humidity) || 0,
+      Math.round(parseFloat(data.distance) || 0), // Convert to integer
       data.pir || false,
       data.rfid || false,
       data.intruder || false
