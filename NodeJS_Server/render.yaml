@@ -1,8 +1,6 @@
-databases:
-  - name: iot-database
-    databaseName: iot_db
-    user: iot_user
-    plan: free
+# Render.yaml configuration for IoT Dashboard with PostgreSQL
+# Note: Database already exists as "iot-database" on Render dashboard
+# This file only configures the web service
 
 services:
   - type: web
@@ -17,9 +15,9 @@ services:
         value: 3001
       - key: MQTT_BROKER
         sync: false
-      - key: DATABASE_URL
-        fromDatabase:
-          name: iot-database
-          property: connectionString
       - key: NODE_ENV
         value: production
+      # DATABASE_URL phải được set thủ công trong Render Dashboard
+      # Vào Web Service → Environment → Add Environment Variable
+      # Key: DATABASE_URL
+      # Value: Internal Database URL từ PostgreSQL service
