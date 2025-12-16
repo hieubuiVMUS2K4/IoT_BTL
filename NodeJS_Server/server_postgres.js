@@ -3,7 +3,9 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const WebSocket = require('ws');
 const path = require('path');
+const mqtt = require('mqtt');
 const db = require('./db');
+const config = require('./config');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,6 +15,24 @@ const WS_PORT = process.env.WS_PORT || 3001;
 app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ===== MQTT CLIENT =====
+const mqttBroker = config.getMqttUrl();
+const mqttClient = mqtt.connect(mqttBroker, {
+  clientId: 'NodeJS_PG_Server_' + Math.random().toString(16).substring(2, 8),
+  clean: true,
+  reconnectPeriod: 5000,
+  username: config.MQTT_USERNAME,
+  password: config.MQTT_PASSWORD,
+  rejectUnauthorized: false
+});
+
+// MQTT Topics
+const TOPIC_DATA = 'iot/sensors/data';
+const TOPIC_CONTROL_LED2 = 'iot/control/led2';
+const TOPIC_CONTROL_FAN = 'iot/control/fan';
+const TOPIC_CONTROL_DOOR = 'iot/control/door';
+const TOPIC_CONTROL_SECURITY = 'iot/control/security';
 
 // ===== DỮ LIỆU HỆ THỐNG (Cache) =====
 let systemData = {
@@ -57,6 +77,92 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     console.log('WebSocket client disconnected');
   });
+});
+
+// ===== MQTT EVENT HANDLERS =====
+mqttClient.on('connect', () => {
+  console.log('✅ Connected to MQTT Broker:', mqttBroker);
+  
+  // Subscribe to sensor data topic
+  mqttClient.subscribe(TOPIC_DATA, (err) => {
+    if (!err) {
+      console.log(`✅ Subscribed to ${TOPIC_DATA}`);
+    } else {
+      console.error('❌ MQTT subscribe error:', err);
+    }
+  });
+});
+
+mqttClient.on('message', async (topic, message) => {
+  console.log(`📥 MQTT Message: topic=${topic}`);
+  
+  if (topic === TOPIC_DATA) {
+    try {
+      const data = JSON.parse(message.toString());
+      console.log('📥 Data from ESP8266:', data);
+      
+      // Check for intrusion change
+      const prevIntruder = systemData.intruder;
+      const prevPir = systemData.pir;
+      
+      // Update system cache
+      systemData = {
+        ...systemData,
+        ...data,
+        lastUpdate: new Date().toISOString(),
+        online: true
+      };
+      
+      // Save to PostgreSQL database
+      try {
+        await db.insertSensorData({
+          temperature: data.temperature || 0,
+          humidity: data.humidity || 0,
+          distance: data.distance || 0,
+          pir: data.pir || false,
+          rfid: data.rfid || false,
+          intruder: data.intruder || false
+        });
+        console.log('💾 Saved to PostgreSQL');
+        
+        // Log intrusion event
+        if (data.intruder && !prevIntruder) {
+          await db.insertEventLog('INTRUSION', 'Intruder detected!', 'CRITICAL');
+          console.log('🚨 INTRUSION event logged');
+        }
+        
+        // Log motion event
+        if (data.pir && !prevPir) {
+          await db.insertEventLog('MOTION', 'Motion detected', 'WARNING');
+        }
+      } catch (dbErr) {
+        console.error('❌ Database save error:', dbErr);
+      }
+      
+      // Broadcast to WebSocket clients
+      broadcast({
+        type: 'update',
+        data: systemData
+      });
+      
+    } catch (parseErr) {
+      console.error('❌ Error parsing MQTT message:', parseErr);
+    }
+  }
+});
+
+mqttClient.on('error', (error) => {
+  console.error('❌ MQTT Error:', error.message);
+  systemData.online = false;
+});
+
+mqttClient.on('close', () => {
+  console.log('⚠️ MQTT connection closed');
+  systemData.online = false;
+});
+
+mqttClient.on('reconnect', () => {
+  console.log('🔄 MQTT reconnecting...');
 });
 
 // ===== INITIALIZE DATABASE =====
@@ -241,6 +347,9 @@ app.post('/api/control/led2', async (req, res) => {
   systemData.led2 = state;
   pendingCommands.led2 = state;
   
+  // Gửi qua MQTT
+  mqttClient.publish(TOPIC_CONTROL_LED2, state ? 'on' : 'off');
+  
   try {
     await db.updateDeviceStatus('led2', state);
     await db.insertEventLog('CONTROL', `LED2 turned ${state ? 'ON' : 'OFF'}`, 'INFO');
@@ -267,6 +376,9 @@ app.post('/api/control/fan', async (req, res) => {
   if (state !== undefined) {
     systemData.fan = state;
     pendingCommands.fan = state;
+    
+    // Gửi qua MQTT
+    mqttClient.publish(TOPIC_CONTROL_FAN, state ? 'on' : 'off');
   }
   
   try {
@@ -296,6 +408,9 @@ app.post('/api/control/door', async (req, res) => {
   systemData.door = state;
   pendingCommands.door = state;
   
+  // Gửi qua MQTT
+  mqttClient.publish(TOPIC_CONTROL_DOOR, state ? 'open' : 'close');
+  
   try {
     await db.updateDeviceStatus('door', state);
     await db.insertEventLog('CONTROL', `Door ${state ? 'OPENED' : 'CLOSED'}`, 'WARNING');
@@ -310,6 +425,54 @@ app.post('/api/control/door', async (req, res) => {
     console.error('Error controlling door:', err);
     res.status(500).json({ error: 'Failed to control door' });
   }
+});
+
+// API điều khiển từ Flutter (generic)
+app.post('/api/control', async (req, res) => {
+  const { device, action } = req.body;
+  console.log(`📤 Control: ${device} = ${action}`);
+  
+  let topic = '';
+  let state = action === 'on' || action === 'open' || action === 'true' || action === '1';
+  
+  switch(device) {
+    case 'led2':
+      topic = TOPIC_CONTROL_LED2;
+      systemData.led2 = state;
+      break;
+    case 'fan':
+      topic = TOPIC_CONTROL_FAN;
+      systemData.fan = state;
+      break;
+    case 'door':
+      topic = TOPIC_CONTROL_DOOR;
+      systemData.door = state;
+      break;
+    case 'security':
+      topic = TOPIC_CONTROL_SECURITY;
+      systemData.securityMode = state;
+      break;
+    default:
+      return res.status(400).json({ status: 'error', message: 'Invalid device' });
+  }
+  
+  // Gửi qua MQTT
+  mqttClient.publish(topic, action, (err) => {
+    if (err) {
+      console.error('MQTT publish error:', err);
+      return res.status(500).json({ status: 'error', message: 'Failed to send command' });
+    }
+    
+    // Broadcast cập nhật
+    broadcast({ type: 'update', data: systemData });
+    
+    res.json({ status: 'success', message: `Command sent: ${device} ${action}` });
+  });
+});
+
+// API status cho Flutter (backward compatible)
+app.get('/api/status', (req, res) => {
+  res.json(systemData);
 });
 
 // Lấy trạng thái tất cả thiết bị
@@ -360,15 +523,19 @@ app.post('/api/admin/clean-data', async (req, res) => {
 // ===== START SERVER =====
 initServer().then(() => {
   app.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n=== IoT Server with PostgreSQL + MQTT ===`);
     console.log(`🚀 HTTP Server running on port ${PORT}`);
     console.log(`🔌 WebSocket Server running on port ${WS_PORT}`);
     console.log(`📊 Database: PostgreSQL connected`);
+    console.log(`📡 MQTT Broker: ${mqttBroker}`);
+    console.log(`==========================================\n`);
   });
 });
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('SIGTERM received, closing server...');
+  mqttClient.end();
   await db.pool.end();
   process.exit(0);
 });
