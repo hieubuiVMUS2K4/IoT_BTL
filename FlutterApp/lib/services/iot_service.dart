@@ -132,4 +132,99 @@ class IoTService {
       return false;
     }
   }
+
+  // ===== NEW POSTGRESQL APIs =====
+  
+  // Lấy lịch sử sensor data từ database
+  Future<List<Map<String, dynamic>>> getSensorHistory({int limit = 100, int offset = 0}) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/sensor/history?limit=$limit&offset=$offset'),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        return data.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      print('Error getting sensor history: $e');
+      return [];
+    }
+  }
+
+  // Lấy sensor data theo khoảng thời gian
+  Future<List<Map<String, dynamic>>> getSensorDataByRange(DateTime start, DateTime end) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/sensor/range?start=${start.toIso8601String()}&end=${end.toIso8601String()}'),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        return data.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      print('Error getting sensor data by range: $e');
+      return [];
+    }
+  }
+
+  // Lấy thống kê
+  Future<Map<String, dynamic>?> getStatistics({int hours = 24}) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/sensor/statistics?hours=$hours'),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      return null;
+    } catch (e) {
+      print('Error getting statistics: $e');
+      return null;
+    }
+  }
+
+  // Lấy event logs
+  Future<List<Map<String, dynamic>>> getEvents({int limit = 50, String? type, String? severity}) async {
+    try {
+      var url = '$baseUrl/api/events?limit=$limit';
+      if (type != null) url += '&type=$type';
+      if (severity != null) url += '&severity=$severity';
+      
+      final response = await http.get(
+        Uri.parse(url),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        return data.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      print('Error getting events: $e');
+      return [];
+    }
+  }
+
+  // Lấy trạng thái tất cả thiết bị
+  Future<List<Map<String, dynamic>>> getDeviceStatuses() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/devices/status'),
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        return data.cast<Map<String, dynamic>>();
+      }
+      return [];
+    } catch (e) {
+      print('Error getting device statuses: $e');
+      return [];
+    }
+  }
 }

@@ -30,8 +30,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() => _isLoading = true);
     
     try {
-      _weeklyStats = await _reportService.getWeeklyStatistics();
-      _todayRecords = await _reportService.getTodayRecords();
+      // Ưu tiên lấy data từ server PostgreSQL
+      try {
+        _weeklyStats = await _reportService.getWeeklyStatisticsFromServer();
+        
+        // Lấy records hôm nay từ server
+        final today = DateTime.now();
+        final startOfDay = DateTime(today.year, today.month, today.day);
+        final endOfDay = startOfDay.add(const Duration(days: 1));
+        _todayRecords = await _reportService.getServerRecordsByDateRange(startOfDay, endOfDay);
+        
+        print('✅ Loaded data from PostgreSQL server');
+      } catch (serverError) {
+        print('⚠️  Server unavailable, falling back to local: $serverError');
+        // Fallback sang local nếu server không khả dụng
+        _weeklyStats = await _reportService.getWeeklyStatistics();
+        _todayRecords = await _reportService.getTodayRecords();
+      }
     } catch (e) {
       print('Error loading dashboard data: $e');
     }

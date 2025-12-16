@@ -4,11 +4,14 @@ import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 import '../models/report_model.dart';
 import '../models/iot_data_model.dart';
+import 'iot_service.dart';
 
 class ReportService {
   static const String _recordsFile = 'sensor_records.json';
   static const String _eventsFile = 'system_events.json';
   static const int _maxRecords = 10000; // Giới hạn số bản ghi lưu trữ
+  
+  final IoTService _iotService = IoTService();
 
   // ===== PATH HELPERS =====
   Future<String> get _localPath async {
@@ -326,6 +329,151 @@ class ReportService {
     final eventsFile = await _eventsDbFile;
     await eventsFile.writeAsString(
       jsonEncode(filteredEvents.map((e) => e.toJson()).toList()),
+    );
+  }
+  
+  // ===== NEW POSTGRESQL METHODS =====
+  
+  /// Lấy thống kê từ PostgreSQL server
+  Future<Map<String, dynamic>?> getServerStatistics({int hours = 24}) async {
+    return await _iotService.getStatistics(hours: hours);
+  }
+  
+  /// Lấy sensor records từ PostgreSQL server
+  Future<List<SensorRecord>> getServerSensorRecords({int limit = 100}) async {
+    final data = await _iotService.getSensorHistory(limit: limit);
+    return data.map((json) => _sensorRecordFromServerJson(json)).toList();
+  }
+  
+  /// Lấy sensor records theo range từ server
+  Future<List<SensorRecord>> getServerRecordsByDateRange(DateTime start, DateTime end) async {
+    final data = await _iotService.getSensorDataByRange(start, end);
+    return data.map((json) => _sensorRecordFromServerJson(json)).toList();
+  }
+  
+  /// Lấy events từ PostgreSQL server
+  Future<List<SystemEvent>> getServerEvents({int limit = 50, String? type, String? severity}) async {
+    final data = await _iotService.getEvents(limit: limit, type: type, severity: severity);
+    return data.map((json) => _systemEventFromServerJson(json)).toList();
+  }
+  
+  /// Tính thống kê hàng ngày từ server data
+  Future<DailyStatistics> calculateDailyStatisticsFromServer(DateTime date) async {
+    final startOfDay = DateTime(date.year, date.month, date.day);
+    final endOfDay = startOfDay.add(const Duration(days: 1));
+
+    final records = await getServerRecordsByDateRange(startOfDay, endOfDay);
+
+    if (records.isEmpty) {
+      return DailyStatistics.empty(date);
+    }
+
+    // Tính toán giống local
+    final temps = records.map((r) => r.temperature).toList();
+    final avgTemp = temps.reduce((a, b) => a + b) / temps.length;
+    final maxTemp = temps.reduce((a, b) => a > b ? a : b);
+    final minTemp = temps.reduce((a, b) => a < b ? a : b);
+
+    final hums = records.map((r) => r.humidity).toList();
+    final avgHum = hums.reduce((a, b) => a + b) / hums.length;
+    final maxHum = hums.reduce((a, b) => a > b ? a : b);
+    final minHum = hums.reduce((a, b) => a < b ? a : b);
+
+    int motionCount = 0;
+    int doorCount = 0;
+    int intruderCount = 0;
+    
+    bool lastPir = false;
+    bool lastDoor = false;
+    bool lastIntruder = false;
+
+    for (final record in records) {
+      if (record.pirActive && !lastPir) motionCount++;
+      if (record.doorOpen && !lastDoor) doorCount++;
+      if (record.intruder && !lastIntruder) intruderCount++;
+      
+      lastPir = record.pirActive;
+      lastDoor = record.doorOpen;
+      lastIntruder = record.intruder;
+    }
+
+    const recordInterval = Duration(seconds: 2);
+    int fanOnCount = records.where((r) => r.fan).length;
+    int led1OnCount = records.where((r) => r.led1).length;
+    int led2OnCount = records.where((r) => r.led2).length;
+
+    return DailyStatistics(
+      date: date,
+      avgTemperature: avgTemp,
+      maxTemperature: maxTemp,
+      minTemperature: minTemp,
+      avgHumidity: avgHum,
+      maxHumidity: maxHum,
+      minHumidity: minHum,
+      motionDetectionCount: motionCount,
+      doorOpenCount: doorCount,
+      intruderAlertCount: intruderCount,
+      totalFanOnTime: recordInterval * fanOnCount,
+      totalLed1OnTime: recordInterval * led1OnCount,
+      totalLed2OnTime: recordInterval * led2OnCount,
+    );
+  }
+  
+  /// Lấy thống kê tuần từ server (ưu tiên dùng thay vì local)
+  Future<List<DailyStatistics>> getWeeklyStatisticsFromServer() async {
+    final stats = <DailyStatistics>[];
+    final today = DateTime.now();
+
+    for (int i = 6; i >= 0; i--) {
+      final date = today.subtract(Duration(days: i));
+      final dailyStat = await calculateDailyStatisticsFromServer(date);
+      stats.add(dailyStat);
+    }
+
+    return stats;
+  }
+  
+  // Helper methods để convert server JSON sang models
+  SensorRecord _sensorRecordFromServerJson(Map<String, dynamic> json) {
+    return SensorRecord(
+      id: json['id'].toString(),
+      temperature: (json['temperature'] as num?)?.toDouble() ?? 0.0,
+      humidity: (json['humidity'] as num?)?.toDouble() ?? 0.0,
+      pirActive: json['pir'] ?? false,
+      led1: false, // Server không lưu LED status trong sensor_data
+      led2: false,
+      fan: false,
+      doorOpen: false,
+      distance: json['distance'] ?? 0,
+      securityMode: false,
+      intruder: json['intruder'] ?? false,
+      timestamp: DateTime.parse(json['created_at']),
+    );
+  }
+  
+  SystemEvent _systemEventFromServerJson(Map<String, dynamic> json) {
+    EventType type;
+    switch (json['event_type']) {
+      case 'INTRUSION':
+        type = EventType.security;
+        break;
+      case 'MOTION':
+        type = EventType.motion;
+        break;
+      case 'CONTROL':
+        type = EventType.deviceControl;
+        break;
+      default:
+        type = EventType.system;
+    }
+    
+    return SystemEvent(
+      id: json['id'].toString(),
+      type: type,
+      description: json['description'] ?? '',
+      timestamp: DateTime.parse(json['created_at']),
+      userId: null,
+      metadata: {'severity': json['severity']},
     );
   }
 }

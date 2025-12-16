@@ -45,8 +45,17 @@ class _ReportsScreenState extends State<ReportsScreen>
     setState(() => _isLoading = true);
     
     try {
-      _events = await _reportService.getEventsByDateRange(_startDate, _endDate);
-      _statistics = await _reportService.getWeeklyStatistics();
+      // Ưu tiên lấy data từ server PostgreSQL
+      try {
+        _events = await _reportService.getServerEvents(limit: 100);
+        _statistics = await _reportService.getWeeklyStatisticsFromServer();
+        print('✅ Loaded reports from PostgreSQL server');
+      } catch (serverError) {
+        print('⚠️  Server unavailable, falling back to local: $serverError');
+        // Fallback sang local storage
+        _events = await _reportService.getEventsByDateRange(_startDate, _endDate);
+        _statistics = await _reportService.getWeeklyStatistics();
+      }
     } catch (e) {
       print('Error loading reports: $e');
     }
